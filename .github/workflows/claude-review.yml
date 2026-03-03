@@ -3,7 +3,9 @@ name: Claude PR Review
 on:
   pull_request:
     types: [opened, synchronize]
-    paths: ['src/**/*.java']
+    paths:
+      - 'src/**/*.java'
+      - 'pom.xml'
 
 jobs:
   review:
@@ -13,27 +15,66 @@ jobs:
         with: { fetch-depth: 0 }
       - name: Get Java diff
         shell: bash
-        run: git diff origin/main...HEAD -- '*.java' | head -c 3000 > diff.txt
+        run: |
+          git diff origin/main...HEAD -- 'src/**/*.java' 'pom.xml' | head -c 3000 > diff.txt
+          if [ ! -s diff.txt ]; then
+            echo "No changes found in Java files or pom.xml"
+            echo "NO_CHANGES=true" >> $GITHUB_ENV
+          fi
+      - name: Install jq
+        if: env.NO_CHANGES != 'true'
+        shell: bash
+        run: |
+          if ! command -v jq &> /dev/null; then
+            choco install jq -y
+          fi
       - name: Claude Review
+        if: env.NO_CHANGES != 'true'
         shell: bash
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
+          if [ -z "$ANTHROPIC_API_KEY" ]; then
+            echo "Error: ANTHROPIC_API_KEY is not set"
+            exit 1
+          fi
           DIFF=$(cat diff.txt)
-          curl -s https://api.anthropic.com/v1/messages \
+          if [ -z "$DIFF" ]; then
+            echo "No diff content to review"
+            exit 0
+          fi
+          DIFF_ESCAPED=$(echo "$DIFF" | jq -Rs .)
+          RESPONSE=$(curl -s -w "\n%{http_code}" https://api.anthropic.com/v1/messages \
             -H "x-api-key: $ANTHROPIC_API_KEY" \
             -H "anthropic-version: 2023-06-01" \
             -H "content-type: application/json" \
-            -d "{\"model\": \"claude-haiku-4-5-20251001\", \"max_tokens\": 1024, \"messages\": [{\"role\": \"user\", \"content\": \"Review this Java diff and provide feedback:\n\n$DIFF\"}]}" \
-            | jq -r '.content[0].text' > review.txt
+            -d "{\"model\": \"claude-sonnet-4-20250514\", \"max_tokens\": 2048, \"messages\": [{\"role\": \"user\", \"content\": \"Review this Java/Maven diff for code quality, bugs, and best practices:\n\n$DIFF_ESCAPED\"}]}")
+          HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+          BODY=$(echo "$RESPONSE" | sed '$d')
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "API request failed with status $HTTP_CODE"
+            echo "$BODY"
+            exit 1
+          fi
+          echo "$BODY" | jq -r '.content[0].text' > review.txt
       - name: Post Review Comment
+        if: env.NO_CHANGES != 'true'
         uses: actions/github-script@v7
         with:
           script: |
-            const review = require('fs').readFileSync('review.txt','utf8');
-            github.rest.issues.createComment({
+            const fs = require('fs');
+            if (!fs.existsSync('review.txt')) {
+              console.log('No review file found');
+              return;
+            }
+            const review = fs.readFileSync('review.txt','utf8');
+            if (!review || review.trim().length === 0) {
+              console.log('Review is empty');
+              return;
+            }
+            await github.rest.issues.createComment({
               issue_number: context.issue.number,
-              owner: context.repo.owner, repo: context.repo.repo,
+              owner: context.repo.owner,
               repo: context.repo.repo,
               body: `## 🤖 Claude Code Review\n\n${review}`
             });
