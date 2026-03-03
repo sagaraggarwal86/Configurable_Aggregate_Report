@@ -35,7 +35,7 @@ This is a JMeter 5.6.3 plugin (Java 17) built as a fat JAR via `maven-shade-plug
 
 ### JMeter Service Discovery
 
-`src/main/resources/META-INF/services/com.sagar.jmeter.sampler.SamplePluginSamplerUI` registers the UI class so JMeter discovers it automatically at startup.
+`src/main/resources/META-INF/services/sampler.com.sagar.jmeter.SamplePluginSamplerUI` registers the UI class so JMeter discovers it automatically at startup.
 
 ### CI/CD
 

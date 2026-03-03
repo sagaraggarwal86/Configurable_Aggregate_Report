@@ -1,6 +1,6 @@
 package com.sagar.jmeter;
 
-import com.sagar.jmeter.sampler.SamplePluginSampler;
+import com.Sagar.jmeter.sampler.SamplePluginSampler;
 import org.apache.jmeter.samplers.SampleResult;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -18,15 +18,30 @@ class SamplePluginSamplerTest {
 
     @Test
     void testDefaultValues() {
-        assertEquals("https://example.com", sampler.getTargetUrl());
-        assertEquals(5000, sampler.getTimeoutMs());
-        assertEquals("", sampler.getPayload());
+        assertEquals("", sampler.getFileName());
+        assertEquals("", sampler.getFilterSettings());
+        assertEquals("", sampler.getStart());
+        assertEquals("", sampler.getDuration());
     }
 
     @Test
-    void testSetUrl() {
-        sampler.setTargetUrl("https://myapi.com");
-        assertEquals("https://myapi.com", sampler.getTargetUrl());
+    void testSetFileName() {
+        sampler.setFileName("/path/to/results.jtl");
+        assertEquals("/path/to/results.jtl", sampler.getFileName());
+    }
+
+    @Test
+    void testSetFilterSettings() {
+        sampler.setFilterSettings("start=0;include=HTTP;includeRegExp=false");
+        assertEquals("start=0;include=HTTP;includeRegExp=false", sampler.getFilterSettings());
+    }
+
+    @Test
+    void testSetStartAndDuration() {
+        sampler.setStart("0");
+        sampler.setDuration("60");
+        assertEquals("0", sampler.getStart());
+        assertEquals("60", sampler.getDuration());
     }
 
     @Test
@@ -44,9 +59,9 @@ class SamplePluginSamplerTest {
     }
 
     @Test
-    void testResponseContainsUrl() {
-        sampler.setTargetUrl("https://test.com");
+    void testResponseContainsFileName() {
+        sampler.setFileName("test-results.jtl");
         String response = new String(sampler.sample(null).getResponseData());
-        assertTrue(response.contains("https://test.com"));
+        assertTrue(response.contains("test-results.jtl"));
     }
 }

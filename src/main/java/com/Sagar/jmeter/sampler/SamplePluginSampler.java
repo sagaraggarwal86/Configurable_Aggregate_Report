@@ -1,4 +1,4 @@
-package com.sagar.jmeter.sampler;
+package com.Sagar.jmeter.sampler;
 
 import org.apache.jmeter.samplers.AbstractSampler;
 import org.apache.jmeter.samplers.Entry;
@@ -12,9 +12,11 @@ public class SamplePluginSampler extends AbstractSampler {
     private static final Logger log = LoggerFactory.getLogger(SamplePluginSampler.class);
 
     // Keys used to store properties (shown in GUI)
-    public static final String TARGET_URL = "SamplePlugin.targetUrl";
-    public static final String TIMEOUT_MS = "SamplePlugin.timeoutMs";
-    public static final String PAYLOAD    = "SamplePlugin.payload";
+    public static final String NAME            = "SamplePlugin.name";
+    public static final String FILE_NAME       = "SamplePlugin.fileName";
+    public static final String FILTER_SETTINGS = "SamplePlugin.filterSettings";
+    public static final String START           = "SamplePlugin.start";
+    public static final String DURATION        = "SamplePlugin.duration";
 
     @Override
     public SampleResult sample(Entry entry) {
@@ -22,11 +24,14 @@ public class SamplePluginSampler extends AbstractSampler {
         result.setSampleLabel(getName());
         result.setDataType(SampleResult.TEXT);
 
-        String url     = getTargetUrl();
-        int    timeout = getTimeoutMs();
-        String payload = getPayload();
+        String name           = getName();
+        String fileName       = getFileName();
+        String filterSettings = getFilterSettings();
+        String start          = getStart();
+        String duration       = getDuration();
 
-        log.info("SamplePlugin → URL: {}, Timeout: {}ms", url, timeout);
+        log.info("SamplePlugin → Name: {}, FileName: {}, FilterSettings: {}, Start: {}, Duration: {}",
+                name, fileName, filterSettings, start, duration);
 
         result.sampleStart(); // ← start measuring time
 
@@ -36,8 +41,8 @@ public class SamplePluginSampler extends AbstractSampler {
             Thread.sleep(50); // simulate processing
 
             String response = String.format(
-                    "Plugin OK!\nURL: %s\nTimeout: %dms\nPayload: %s",
-                    url, timeout, payload
+                    "Plugin OK!\nName: %s\nFileName: %s\nFilterSettings: %s\nStart: %s\nDuration: %s",
+                    name, fileName, filterSettings, start, duration
             );
 
             result.sampleEnd();
@@ -64,12 +69,18 @@ public class SamplePluginSampler extends AbstractSampler {
     }
 
     // Getters & setters bound to JMeter's property store
-    public String getTargetUrl() { return getPropertyAsString(TARGET_URL, "https://example.com"); }
-    public void   setTargetUrl(String v)  { setProperty(TARGET_URL, v); }
+    public String getName()           { return getPropertyAsString(NAME, ""); }
+    public void   setName(String v)   { setProperty(NAME, v); }
 
-    public int    getTimeoutMs() { return getPropertyAsInt(TIMEOUT_MS, 5000); }
-    public void   setTimeoutMs(int v)     { setProperty(TIMEOUT_MS, v); }
+    public String getFileName()       { return getPropertyAsString(FILE_NAME, ""); }
+    public void   setFileName(String v) { setProperty(FILE_NAME, v); }
 
-    public String getPayload()   { return getPropertyAsString(PAYLOAD, ""); }
-    public void   setPayload(String v)    { setProperty(PAYLOAD, v); }
+    public String getFilterSettings() { return getPropertyAsString(FILTER_SETTINGS, ""); }
+    public void   setFilterSettings(String v) { setProperty(FILTER_SETTINGS, v); }
+
+    public String getStart()          { return getPropertyAsString(START, ""); }
+    public void   setStart(String v)  { setProperty(START, v); }
+
+    public String getDuration()       { return getPropertyAsString(DURATION, ""); }
+    public void   setDuration(String v) { setProperty(DURATION, v); }
 }

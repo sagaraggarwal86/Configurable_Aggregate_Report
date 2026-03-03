@@ -44,7 +44,7 @@ jobs:
             exit 0
           fi
           PAYLOAD=$(jq -n \
-            --arg model "claude-sonnet-4-20250514" \
+            --arg model "claude-haiku-4-5-20251001" \
             --argjson max_tokens 2048 \
             --arg diff "$(cat diff.txt)" \
             '{

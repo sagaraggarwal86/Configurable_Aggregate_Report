@@ -1,0 +1,15 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="UI Preview" type="Application" factoryName="Application">
+    <option name="MAIN_CLASS_NAME" value="com.sagar.jmeter.UIPreview" />
+    <module name="jmeter-sample-plugin" />
+    <extension name="coverage">
+      <pattern>
+        <option name="PATTERN" value="com.sagar.jmeter.*" />
+        <option name="ENABLED" value="true" />
+      </pattern>
+    </extension>
+    <method v="2">
+      <option name="Make" enabled="true" />
+    </method>
+  </configuration>
+</component>
