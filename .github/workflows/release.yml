@@ -2,7 +2,10 @@ name: Release on Tag
 
 on:
   push:
-    tags: ['v*.*.*']
+    tags: [ 'v*.*.*' ]
+
+permissions:
+  contents: write
 
 jobs:
   release:
