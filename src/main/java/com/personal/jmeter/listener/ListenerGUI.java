@@ -16,7 +16,9 @@ import javax.swing.table.TableColumnModel;
 import java.awt.*;
 import java.io.File;
 import java.text.DecimalFormat;
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.List;
 import java.util.Map;
 
@@ -75,10 +77,21 @@ public class ListenerGUI extends AbstractVisualizer {
     // ── Bottom controls ──────────────────────────────────────────
     private final JCheckBox saveTableHeaderBox = new JCheckBox("Save Table Header");
 
+    // ── Time info fields (read-only) ─────────────────────────────
+    private final JTextField startTimeField  = new JTextField("", 20);
+    private final JTextField endTimeField    = new JTextField("", 20);
+    private final JTextField durationField   = new JTextField("", 20);
+    private static final SimpleDateFormat TIME_FORMAT =
+            new SimpleDateFormat("MM/dd/yy HH:mm:ss");
+
     // ── State ────────────────────────────────────────────────────
     private String lastLoadedFilePath = null;
     /** Cached parse results for column toggle re-rendering. */
     private Map<String, SamplingStatCalculator> cachedResults = null;
+    /** True while configure() is running — suppresses file auto-load. */
+    private boolean configuring = false;
+    /** True after user clicks Clear — suppresses file auto-load until next Browse. */
+    private boolean userCleared = false;
 
     // ─────────────────────────────────────────────────────────────
     // Constructor
@@ -102,18 +115,20 @@ public class ListenerGUI extends AbstractVisualizer {
         Container titlePanel = makeTitlePanel();
         add(titlePanel, BorderLayout.NORTH);
 
-        // Remove unwanted FilePanel controls & hook Browse button
+        // Remove unwanted FilePanel controls & monitor filename field
         hideFilePanelExtras(titlePanel);
-        hookBrowseButton(titlePanel);
+        overrideBrowseButton(titlePanel);
+        hookFilePanel(titlePanel);
 
         // Plugin-specific content
         JPanel mainPanel = new JPanel(new BorderLayout(5, 5));
         mainPanel.setBorder(BorderFactory.createEmptyBorder(5, 5, 5, 5));
 
-        // Top section: filter panel + column visibility panel
-        JPanel topSection = new JPanel(new BorderLayout(5, 5));
-        topSection.add(buildFilterPanel(), BorderLayout.NORTH);
-        topSection.add(buildColumnVisibilityPanel(), BorderLayout.SOUTH);
+        // Top section: filter panel + column visibility + time info
+        JPanel topSection = new JPanel();
+        topSection.setLayout(new BoxLayout(topSection, BoxLayout.Y_AXIS));
+        topSection.add(buildFilterPanel());
+        topSection.add(buildTimeInfoPanel());
 
         mainPanel.add(topSection, BorderLayout.NORTH);
         mainPanel.add(buildTablePanel(), BorderLayout.CENTER);
@@ -151,30 +166,95 @@ public class ListenerGUI extends AbstractVisualizer {
     }
 
     /**
-     * Find the Browse button in the component tree and hook our JTL loader.
-     *
-     * <p>After the Browse file dialog closes, FilePanel sets the filename text.
-     * Our listener fires via {@code invokeLater} (so FilePanel finishes first),
-     * reads {@code getFile()}, and loads the JTL.</p>
+     * Replace the Browse button's action so the file chooser opens in
+     * the directory of the currently entered filename, or the current
+     * working directory if no file is set.
      */
-    private void hookBrowseButton(Container container) {
+    private void overrideBrowseButton(Container container) {
         for (Component comp : container.getComponents()) {
-            if (comp instanceof JButton btn) {
+            if (comp instanceof JButton btn && btn.isVisible()) {
                 String text = btn.getText();
-                // Hook only "Browse..." button, skip "Configure" and unnamed buttons
-                if (text != null && text.startsWith("Browse")) {
-                    btn.addActionListener(e -> SwingUtilities.invokeLater(() -> {
-                        String filename = getFile();
-                        if (filename != null && !filename.trim().isEmpty()
-                                && new File(filename).exists()) {
-                            loadJTLFile(filename);
+                if (text != null && !text.contains("Configure")) {
+                    // Remove JMeter's default Browse action
+                    for (java.awt.event.ActionListener al : btn.getActionListeners()) {
+                        btn.removeActionListener(al);
+                    }
+                    // Add our own Browse that opens in current directory
+                    btn.addActionListener(e -> {
+                        // Determine starting directory
+                        File startDir = new File(System.getProperty("user.dir"));
+                        String currentFile = getFile();
+                        if (currentFile != null && !currentFile.trim().isEmpty()) {
+                            File f = new File(currentFile);
+                            if (f.getParentFile() != null && f.getParentFile().isDirectory()) {
+                                startDir = f.getParentFile();
+                            }
                         }
-                    }));
+
+                        JFileChooser fc = new JFileChooser(startDir);
+                        fc.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter(
+                                "JTL Files (*.jtl)", "jtl"));
+                        fc.setAcceptAllFileFilterUsed(true);
+
+                        if (fc.showOpenDialog(this) == JFileChooser.APPROVE_OPTION) {
+                            File selected = fc.getSelectedFile();
+                            // Set the filename in JMeter's FilePanel text field
+                            // This triggers our DocumentListener → checkAndLoadFile()
+                            setFile(selected.getAbsolutePath());
+                        }
+                    });
                 }
             }
             if (comp instanceof Container c) {
-                hookBrowseButton(c);
+                overrideBrowseButton(c);
             }
+        }
+    }
+
+    /**
+     * Find the filename JTextField inside the FilePanel and monitor it.
+     *
+     * <p>When the user clicks Browse → selects a file → clicks OK,
+     * JMeter's FilePanel sets the text in this field. Our DocumentListener
+     * detects the change and triggers file loading.</p>
+     *
+     * <p>The {@code configuring} flag prevents loading when
+     * {@code configure()} restores the field text during tree navigation.
+     * The {@code userCleared} flag prevents loading after Clear until
+     * a new Browse action changes the text.</p>
+     */
+    private void hookFilePanel(Container container) {
+        for (Component comp : container.getComponents()) {
+            if (comp instanceof JTextField tf && tf.isEditable()
+                    && tf != startOffsetField && tf != endOffsetField
+                    && tf != percentileField && tf != startTimeField
+                    && tf != endTimeField && tf != durationField) {
+                // This is the filename text field (or Name/Comments — but those
+                // won't contain valid .jtl paths, so loadJTLFile will just skip)
+                tf.getDocument().addDocumentListener((SimpleDocListener) () -> {
+                    if (configuring) return;
+                    // Any text change from Browse resets the cleared state
+                    userCleared = false;
+                    // Debounce: schedule load after EDT finishes current event
+                    SwingUtilities.invokeLater(this::checkAndLoadFile);
+                });
+            }
+            if (comp instanceof Container c) {
+                hookFilePanel(c);
+            }
+        }
+    }
+
+    /**
+     * Check if the filename in the file panel points to a valid JTL file
+     * and load it. Skips if user has cleared data and not browsed again.
+     */
+    private void checkAndLoadFile() {
+        if (userCleared) return;
+        String filename = getFile();
+        if (filename != null && !filename.trim().isEmpty()
+                && new File(filename).exists()) {
+            loadJTLFile(filename);
         }
     }
 
@@ -188,14 +268,18 @@ public class ListenerGUI extends AbstractVisualizer {
         c.insets = new Insets(4, 6, 4, 6);
         c.anchor = GridBagConstraints.WEST;
 
+        // Labels row
         c.gridy = 0;
-        c.gridx = 0; c.weightx = 0.33;
+        c.gridx = 0; c.weightx = 0.25;
         addLabel(panel, "Start Offset (Seconds)", c);
-        c.gridx = 1; c.weightx = 0.33;
+        c.gridx = 1; c.weightx = 0.25;
         addLabel(panel, "End Offset (Seconds)", c);
-        c.gridx = 2; c.weightx = 0.34;
+        c.gridx = 2; c.weightx = 0.25;
         addLabel(panel, "Percentile (%)", c);
+        c.gridx = 3; c.weightx = 0.25;
+        addLabel(panel, "Visible Columns", c);
 
+        // Input row
         c.gridy = 1;
         c.fill = GridBagConstraints.HORIZONTAL;
         c.gridx = 0;
@@ -208,27 +292,24 @@ public class ListenerGUI extends AbstractVisualizer {
         percentileField.setFont(FONT_REGULAR);
         panel.add(percentileField, c);
 
+        // Column visibility dropdown in 4th column
+        c.gridx = 3;
+        c.fill = GridBagConstraints.NONE;
+        panel.add(buildColumnDropdown(), c);
+
         return panel;
     }
 
     /**
-     * Build a dropdown button that opens a popup menu with checkboxes
-     * for toggling column visibility.
+     * Build the "Select Columns ▼" dropdown button with checkbox menu items.
      */
-    private JPanel buildColumnVisibilityPanel() {
-        JPanel panel = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 2));
-
-        JLabel label = new JLabel("Visible Columns:");
-        label.setFont(FONT_HEADER);
-        panel.add(label);
-
+    private JButton buildColumnDropdown() {
         JPopupMenu popup = new JPopupMenu();
         for (int i = 0; i < ALL_COLUMNS.length; i++) {
             JCheckBoxMenuItem item = new JCheckBoxMenuItem(ALL_COLUMNS[i], true);
             item.setFont(FONT_REGULAR);
 
             if (i == 0) {
-                // "Transaction Name" always visible, non-toggleable
                 item.setEnabled(false);
             } else {
                 final int colIndex = i;
@@ -242,9 +323,98 @@ public class ListenerGUI extends AbstractVisualizer {
         JButton dropdownBtn = new JButton("Select Columns ▼");
         dropdownBtn.setFont(FONT_REGULAR);
         dropdownBtn.addActionListener(e -> popup.show(dropdownBtn, 0, dropdownBtn.getHeight()));
-        panel.add(dropdownBtn);
+        return dropdownBtn;
+    }
+
+    /**
+     * Build the test time info panel with Start, End, and Duration fields.
+     * All fields are read-only — populated when a JTL file is loaded.
+     */
+    private JPanel buildTimeInfoPanel() {
+        JPanel panel = new JPanel(new GridBagLayout());
+        TitledBorder border = new TitledBorder("Test Time Info");
+        border.setTitleFont(FONT_HEADER);
+        panel.setBorder(border);
+
+        GridBagConstraints c = new GridBagConstraints();
+        c.insets = new Insets(4, 6, 4, 6);
+        c.anchor = GridBagConstraints.WEST;
+
+        // Labels row
+        c.gridy = 0;
+        c.gridx = 0; c.weightx = 0.33;
+        addLabel(panel, "Start Date/Time", c);
+        c.gridx = 1; c.weightx = 0.33;
+        addLabel(panel, "End Date/Time", c);
+        c.gridx = 2; c.weightx = 0.34;
+        addLabel(panel, "Duration", c);
+
+        // Fields row (read-only)
+        c.gridy = 1;
+        c.fill = GridBagConstraints.HORIZONTAL;
+
+        c.gridx = 0;
+        startTimeField.setFont(FONT_REGULAR);
+        startTimeField.setEditable(false);
+        startTimeField.setBackground(new Color(240, 240, 240));
+        panel.add(startTimeField, c);
+
+        c.gridx = 1;
+        endTimeField.setFont(FONT_REGULAR);
+        endTimeField.setEditable(false);
+        endTimeField.setBackground(new Color(240, 240, 240));
+        panel.add(endTimeField, c);
+
+        c.gridx = 2;
+        durationField.setFont(FONT_REGULAR);
+        durationField.setEditable(false);
+        durationField.setBackground(new Color(240, 240, 240));
+        panel.add(durationField, c);
 
         return panel;
+    }
+
+    /**
+     * Format duration milliseconds into human-readable string.
+     * Example: 125400 → "0h 2m 5s"
+     */
+    private String formatDuration(long durationMs) {
+        long totalSec = durationMs / 1000;
+        long hours = totalSec / 3600;
+        long minutes = (totalSec % 3600) / 60;
+        long seconds = totalSec % 60;
+        return String.format("%dh %dm %ds", hours, minutes, seconds);
+    }
+
+    /**
+     * Update the time info fields from ParseResult data and current filter settings.
+     *
+     * <p>Duration logic: if both startOffset and endOffset are set,
+     * duration = endOffset - startOffset (the analysis window).
+     * Otherwise, duration is computed from the actual sample timestamps.</p>
+     */
+    private void updateTimeInfo(JTLParser.ParseResult parseResult) {
+        if (parseResult.startTimeMs > 0) {
+            startTimeField.setText(TIME_FORMAT.format(new Date(parseResult.startTimeMs)));
+        } else {
+            startTimeField.setText("");
+        }
+        if (parseResult.endTimeMs > 0) {
+            endTimeField.setText(TIME_FORMAT.format(new Date(parseResult.endTimeMs)));
+        } else {
+            endTimeField.setText("");
+        }
+        if (parseResult.durationMs > 0) {
+            durationField.setText(formatDuration(parseResult.durationMs));
+        } else {
+            durationField.setText("");
+        }
+    }
+
+    private void clearTimeInfo() {
+        startTimeField.setText("");
+        endTimeField.setText("");
+        durationField.setText("");
     }
 
     private void addLabel(JPanel panel, String text, GridBagConstraints c) {
@@ -259,6 +429,12 @@ public class ListenerGUI extends AbstractVisualizer {
         resultsTable.setAutoResizeMode(JTable.AUTO_RESIZE_ALL_COLUMNS);
         resultsTable.getTableHeader().setReorderingAllowed(false);
         resultsTable.setRowHeight(20);
+
+        // Enable column sorting
+        javax.swing.table.TableRowSorter<DefaultTableModel> sorter =
+                new javax.swing.table.TableRowSorter<>(tableModel);
+        resultsTable.setRowSorter(sorter);
+
         JScrollPane scrollPane = new JScrollPane(resultsTable);
         scrollPane.setPreferredSize(new Dimension(900, 300));
         return scrollPane;
@@ -409,24 +585,22 @@ public class ListenerGUI extends AbstractVisualizer {
 
     @Override
     public void configure(TestElement el) {
-        super.configure(el);
-        startOffsetField.setText(
-                el.getPropertyAsString(ListenerCollector.PROP_START_OFFSET, ""));
-        endOffsetField.setText(
-                el.getPropertyAsString(ListenerCollector.PROP_END_OFFSET, ""));
-        String savedPercentile =
-                el.getPropertyAsString(ListenerCollector.PROP_PERCENTILE, "90");
-        percentileField.setText(savedPercentile.isEmpty() ? "90" : savedPercentile);
-
-        // Auto-load JTL file if configured and not already loaded
-        if (el instanceof ListenerCollector collector) {
-            String filename = collector.getFilename();
-            if (filename != null && !filename.trim().isEmpty()
-                    && new File(filename).exists()
-                    && !filename.equals(lastLoadedFilePath)) {
-                loadJTLFile(filename);
-            }
+        configuring = true;
+        try {
+            super.configure(el);
+            startOffsetField.setText(
+                    el.getPropertyAsString(ListenerCollector.PROP_START_OFFSET, ""));
+            endOffsetField.setText(
+                    el.getPropertyAsString(ListenerCollector.PROP_END_OFFSET, ""));
+            String savedPercentile =
+                    el.getPropertyAsString(ListenerCollector.PROP_PERCENTILE, "90");
+            percentileField.setText(savedPercentile.isEmpty() ? "90" : savedPercentile);
+        } finally {
+            configuring = false;
         }
+        // No auto-load here. File is only loaded via:
+        // 1. Browse → filename text changes → DocumentListener → loadJTLFile()
+        // 2. Offset/percentile changes → reloadJTL()
     }
 
     @Override
@@ -438,6 +612,7 @@ public class ListenerGUI extends AbstractVisualizer {
         tableModel.setRowCount(0);
         cachedResults = null;
         lastLoadedFilePath = null;
+        clearTimeInfo();
     }
 
     // ─────────────────────────────────────────────────────────────
@@ -453,7 +628,8 @@ public class ListenerGUI extends AbstractVisualizer {
     public void clearData() {
         tableModel.setRowCount(0);
         cachedResults = null;
-        lastLoadedFilePath = null;
+        userCleared = true;  // Prevent auto-reload until next Browse
+        clearTimeInfo();
     }
 
     // ─────────────────────────────────────────────────────────────
@@ -465,13 +641,15 @@ public class ListenerGUI extends AbstractVisualizer {
      */
     public boolean loadJTLFile(String filePath) {
         lastLoadedFilePath = filePath;
+        userCleared = false;
         try {
             JTLParser.FilterOptions opts = buildFilterOptions();
             JTLParser parser = new JTLParser();
-            Map<String, SamplingStatCalculator> results = parser.parse(filePath, opts);
+            JTLParser.ParseResult parseResult = parser.parse(filePath, opts);
 
-            cachedResults = results;
-            populateTable(results, opts.percentile);
+            cachedResults = parseResult.results;
+            populateTable(parseResult.results, opts.percentile);
+            updateTimeInfo(parseResult);
             return true;
         } catch (Exception e) {
             log.error("Error loading JTL file: {}", filePath, e);
@@ -483,15 +661,17 @@ public class ListenerGUI extends AbstractVisualizer {
      * Re-parse the last loaded JTL file when offsets or percentile change.
      */
     private void reloadJTL() {
+        if (userCleared) return;
         if (lastLoadedFilePath == null || lastLoadedFilePath.isEmpty()) return;
         if (!new File(lastLoadedFilePath).exists()) return;
         try {
             JTLParser.FilterOptions opts = buildFilterOptions();
             JTLParser parser = new JTLParser();
-            Map<String, SamplingStatCalculator> results = parser.parse(lastLoadedFilePath, opts);
+            JTLParser.ParseResult parseResult = parser.parse(lastLoadedFilePath, opts);
 
-            cachedResults = results;
-            populateTable(results, opts.percentile);
+            cachedResults = parseResult.results;
+            populateTable(parseResult.results, opts.percentile);
+            updateTimeInfo(parseResult);
         } catch (Exception e) {
             log.debug("Error reloading JTL with filters: {}", e.getMessage());
         }

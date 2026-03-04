@@ -11,7 +11,9 @@ import javax.swing.table.TableColumnModel;
 import java.awt.*;
 import java.io.File;
 import java.text.DecimalFormat;
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -61,6 +63,13 @@ public class UIPreview {
     private Map<String, SamplingStatCalculator> cachedResults = new HashMap<>();
     private String lastLoadedFilePath = null;
 
+    // ── Time info fields (read-only) ─────────────────────────────
+    private final JTextField startTimeField  = new JTextField("", 20);
+    private final JTextField endTimeField    = new JTextField("", 20);
+    private final JTextField durationField   = new JTextField("", 20);
+    private static final SimpleDateFormat TIME_FORMAT =
+            new SimpleDateFormat("MM/dd/yy HH:mm:ss");
+
     // ─────────────────────────────────────────────────────────────
 
     public static void main(String[] args) {
@@ -103,9 +112,10 @@ public class UIPreview {
         titleAndFile.add(buildFilePanel(), BorderLayout.CENTER);
         topWrapper.add(titleAndFile, BorderLayout.NORTH);
 
-        JPanel filterAndColumns = new JPanel(new BorderLayout(0, 0));
-        filterAndColumns.add(buildFilterPanel(), BorderLayout.NORTH);
-        filterAndColumns.add(buildColumnVisibilityPanel(), BorderLayout.SOUTH);
+        JPanel filterAndColumns = new JPanel();
+        filterAndColumns.setLayout(new BoxLayout(filterAndColumns, BoxLayout.Y_AXIS));
+        filterAndColumns.add(buildFilterPanel());
+        filterAndColumns.add(buildTimeInfoPanel());
         topWrapper.add(filterAndColumns, BorderLayout.CENTER);
 
         // ── Centre: results table ────────────────────────────────
@@ -114,6 +124,12 @@ public class UIPreview {
         resultsTable.setAutoResizeMode(JTable.AUTO_RESIZE_ALL_COLUMNS);
         resultsTable.getTableHeader().setReorderingAllowed(false);
         resultsTable.setRowHeight(20);
+
+        // Enable column sorting
+        javax.swing.table.TableRowSorter<DefaultTableModel> sorter =
+                new javax.swing.table.TableRowSorter<>(tableModel);
+        resultsTable.setRowSorter(sorter);
+
         JScrollPane scrollPane = new JScrollPane(resultsTable);
         scrollPane.setPreferredSize(new Dimension(900, 200));
 
@@ -188,37 +204,23 @@ public class UIPreview {
         c.anchor = GridBagConstraints.WEST;
 
         c.gridy = 0;
-        c.gridx = 0; c.weightx = 0.33; panel.add(makeLabel("Start Offset (Seconds)"), c);
-        c.gridx = 1; c.weightx = 0.33; panel.add(makeLabel("End Offset (Seconds)"), c);
-        c.gridx = 2; c.weightx = 0.34; panel.add(makeLabel("Percentile (%)"), c);
+        c.gridx = 0; c.weightx = 0.25; panel.add(makeLabel("Start Offset (Seconds)"), c);
+        c.gridx = 1; c.weightx = 0.25; panel.add(makeLabel("End Offset (Seconds)"), c);
+        c.gridx = 2; c.weightx = 0.25; panel.add(makeLabel("Percentile (%)"), c);
+        c.gridx = 3; c.weightx = 0.25; panel.add(makeLabel("Visible Columns"), c);
 
         c.gridy = 1; c.fill = GridBagConstraints.HORIZONTAL;
         c.gridx = 0; startOffsetField.setFont(FONT_REGULAR); panel.add(startOffsetField, c);
         c.gridx = 1; endOffsetField.setFont(FONT_REGULAR);   panel.add(endOffsetField, c);
         c.gridx = 2; percentileField.setFont(FONT_REGULAR);  panel.add(percentileField, c);
 
+        c.gridx = 3; c.fill = GridBagConstraints.NONE;
+        panel.add(buildColumnDropdown(), c);
+
         return panel;
     }
 
-    // ── Helpers ───────────────────────────────────────────────────
-    private JLabel makeLabel(String text) {
-        JLabel l = new JLabel(text); l.setFont(FONT_REGULAR); return l;
-    }
-    private JTextField makeTextField(String text, int cols) {
-        JTextField f = new JTextField(text, cols); f.setFont(FONT_REGULAR); return f;
-    }
-
-    // ─────────────────────────────────────────────────────────────
-    // Column visibility
-    // ─────────────────────────────────────────────────────────────
-
-    private JPanel buildColumnVisibilityPanel() {
-        JPanel panel = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 2));
-
-        JLabel label = new JLabel("Visible Columns:");
-        label.setFont(FONT_HEADER);
-        panel.add(label);
-
+    private JButton buildColumnDropdown() {
         JPopupMenu popup = new JPopupMenu();
         for (int i = 0; i < COLUMN_NAMES.length; i++) {
             JCheckBoxMenuItem item = new JCheckBoxMenuItem(COLUMN_NAMES[i], true);
@@ -238,9 +240,89 @@ public class UIPreview {
         JButton dropdownBtn = new JButton("Select Columns ▼");
         dropdownBtn.setFont(FONT_REGULAR);
         dropdownBtn.addActionListener(e -> popup.show(dropdownBtn, 0, dropdownBtn.getHeight()));
-        panel.add(dropdownBtn);
+        return dropdownBtn;
+    }
+
+    // ── Helpers ───────────────────────────────────────────────────
+    private JLabel makeLabel(String text) {
+        JLabel l = new JLabel(text); l.setFont(FONT_REGULAR); return l;
+    }
+    private JTextField makeTextField(String text, int cols) {
+        JTextField f = new JTextField(text, cols); f.setFont(FONT_REGULAR); return f;
+    }
+
+    private JPanel buildTimeInfoPanel() {
+        JPanel panel = new JPanel(new GridBagLayout());
+        TitledBorder border = new TitledBorder("Test Time Info");
+        border.setTitleFont(FONT_HEADER);
+        panel.setBorder(border);
+
+        GridBagConstraints c = new GridBagConstraints();
+        c.insets = new Insets(4, 6, 4, 6);
+        c.anchor = GridBagConstraints.WEST;
+
+        c.gridy = 0;
+        c.gridx = 0; c.weightx = 0.33;
+        panel.add(makeLabel("Start Date/Time"), c);
+        c.gridx = 1; c.weightx = 0.33;
+        panel.add(makeLabel("End Date/Time"), c);
+        c.gridx = 2; c.weightx = 0.34;
+        panel.add(makeLabel("Duration"), c);
+
+        c.gridy = 1;
+        c.fill = GridBagConstraints.HORIZONTAL;
+
+        c.gridx = 0;
+        startTimeField.setFont(FONT_REGULAR);
+        startTimeField.setEditable(false);
+        startTimeField.setBackground(new Color(240, 240, 240));
+        panel.add(startTimeField, c);
+
+        c.gridx = 1;
+        endTimeField.setFont(FONT_REGULAR);
+        endTimeField.setEditable(false);
+        endTimeField.setBackground(new Color(240, 240, 240));
+        panel.add(endTimeField, c);
+
+        c.gridx = 2;
+        durationField.setFont(FONT_REGULAR);
+        durationField.setEditable(false);
+        durationField.setBackground(new Color(240, 240, 240));
+        panel.add(durationField, c);
 
         return panel;
+    }
+
+    private void updateTimeInfo(JTLParser.ParseResult parseResult) {
+        if (parseResult.startTimeMs > 0) {
+            startTimeField.setText(TIME_FORMAT.format(new Date(parseResult.startTimeMs)));
+        } else {
+            startTimeField.setText("");
+        }
+        if (parseResult.endTimeMs > 0) {
+            endTimeField.setText(TIME_FORMAT.format(new Date(parseResult.endTimeMs)));
+        } else {
+            endTimeField.setText("");
+        }
+        if (parseResult.durationMs > 0) {
+            durationField.setText(formatDuration(parseResult.durationMs));
+        } else {
+            durationField.setText("");
+        }
+    }
+
+    private String formatDuration(long durationMs) {
+        long totalSec = durationMs / 1000;
+        long hours = totalSec / 3600;
+        long minutes = (totalSec % 3600) / 60;
+        long seconds = totalSec % 60;
+        return String.format("%dh %dm %ds", hours, minutes, seconds);
+    }
+
+    private void clearTimeInfo() {
+        startTimeField.setText("");
+        endTimeField.setText("");
+        durationField.setText("");
     }
 
     private void storeOriginalColumns() {
@@ -350,7 +432,17 @@ public class UIPreview {
     // ─────────────────────────────────────────────────────────────
 
     private void browseJTL() {
-        JFileChooser fc = new JFileChooser();
+        // Determine starting directory
+        File startDir = new File(System.getProperty("user.dir"));
+        String currentFile = fileNameField.getText().trim();
+        if (!currentFile.isEmpty()) {
+            File f = new File(currentFile);
+            if (f.getParentFile() != null && f.getParentFile().isDirectory()) {
+                startDir = f.getParentFile();
+            }
+        }
+
+        JFileChooser fc = new JFileChooser(startDir);
         fc.setFileFilter(new javax.swing.filechooser.FileFilter() {
             public boolean accept(File f) {
                 return f.isDirectory() || f.getName().toLowerCase().endsWith(".jtl");
@@ -370,14 +462,13 @@ public class UIPreview {
             try {
                 tableModel.setRowCount(0);
                 JTLParser.FilterOptions opts = buildFilterOptions();
-                Map<String, SamplingStatCalculator> results =
-                        new JTLParser().parse(filePath, opts);
+                JTLParser.ParseResult parseResult = new JTLParser().parse(filePath, opts);
 
-                cachedResults = results;
-                populateTableWithResults(results, opts.percentile);
+                cachedResults = parseResult.results;
+                populateTableWithResults(parseResult.results, opts.percentile);
+                updateTimeInfo(parseResult);
 
-                // Subtract 1 for TOTAL row
-                int txnCount = Math.max(0, results.size() - 1);
+                int txnCount = Math.max(0, parseResult.results.size() - 1);
                 JOptionPane.showMessageDialog(null,
                         "Loaded " + txnCount + " transaction types from JTL file",
                         "Success", JOptionPane.INFORMATION_MESSAGE);
@@ -396,10 +487,11 @@ public class UIPreview {
             try {
                 tableModel.setRowCount(0);
                 JTLParser.FilterOptions opts = buildFilterOptions();
-                Map<String, SamplingStatCalculator> results =
+                JTLParser.ParseResult parseResult =
                         new JTLParser().parse(lastLoadedFilePath, opts);
-                cachedResults = results;
-                populateTableWithResults(results, opts.percentile);
+                cachedResults = parseResult.results;
+                populateTableWithResults(parseResult.results, opts.percentile);
+                updateTimeInfo(parseResult);
             } catch (Exception e) {
                 System.err.println("Error reloading: " + e.getMessage());
             }

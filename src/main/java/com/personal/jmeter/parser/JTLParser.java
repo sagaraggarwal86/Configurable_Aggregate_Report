@@ -21,19 +21,40 @@ public class JTLParser {
     private static final String TOTAL_LABEL = "TOTAL";
 
     /**
-     * Parse JTL file and return aggregated results by label.
+     * Result of parsing a JTL file — includes aggregated stats plus time metadata.
+     */
+    public static class ParseResult {
+        /** Per-label calculators with TOTAL row last. */
+        public final Map<String, SamplingStatCalculator> results;
+        /** Timestamp (ms) of the earliest sample start. */
+        public final long startTimeMs;
+        /** Timestamp (ms) of the latest sample end (timestamp + elapsed). */
+        public final long endTimeMs;
+        /** Test duration in milliseconds (endTimeMs - startTimeMs). */
+        public final long durationMs;
+
+        public ParseResult(Map<String, SamplingStatCalculator> results,
+                           long startTimeMs, long endTimeMs) {
+            this.results = results;
+            this.startTimeMs = startTimeMs;
+            this.endTimeMs = endTimeMs;
+            this.durationMs = Math.max(0, endTimeMs - startTimeMs);
+        }
+    }
+
+    /**
+     * Parse JTL file and return aggregated results with time metadata.
      *
      * @param filePath path to the JTL CSV file
      * @param options  filter and display options
-     * @return ordered map of label → calculator (TOTAL row last)
+     * @return ParseResult containing stats map + start/end/duration
      * @throws IOException if the file cannot be read
      */
-    public Map<String, SamplingStatCalculator> parse(String filePath, FilterOptions options) throws IOException {
+    public ParseResult parse(String filePath, FilterOptions options) throws IOException {
         Map<String, SamplingStatCalculator> results = new LinkedHashMap<>();
         SamplingStatCalculator totalCalc = new SamplingStatCalculator(TOTAL_LABEL);
 
         // First pass: find min timestamp (for offset filtering) and collect all labels
-        //             (to identify sub-results like "HTTP Request-0", "HTTP Request-1")
         long minTimestamp = Long.MAX_VALUE;
         java.util.Set<String> allLabels = new java.util.HashSet<>();
 
@@ -51,13 +72,10 @@ public class JTLParser {
             while ((line = reader.readLine()) != null) {
                 try {
                     String[] values = splitCsvLine(line);
-                    // Collect label
                     if (labelIndex != null && labelIndex < values.length) {
                         allLabels.add(values[labelIndex].trim());
                     }
-                    // Track min timestamp for offset filtering
-                    if ((options.startOffset > 0 || options.endOffset > 0)
-                            && tsIndex != null && tsIndex < values.length) {
+                    if (tsIndex != null && tsIndex < values.length) {
                         long ts = Long.parseLong(values[tsIndex].trim());
                         if (ts > 0 && ts < minTimestamp) {
                             minTimestamp = ts;
@@ -70,9 +88,7 @@ public class JTLParser {
         }
         options.minTimestamp = (minTimestamp == Long.MAX_VALUE) ? 0 : minTimestamp;
 
-        // Build set of sub-result labels to skip.
-        // JMeter names sub-results as "ParentLabel-0", "ParentLabel-1", etc.
-        // A label is a sub-result if it matches "X-N" and "X" also exists as a label.
+        // Build sub-result label set
         java.util.Set<String> subResultLabels = new java.util.HashSet<>();
         for (String label : allLabels) {
             int lastDash = label.lastIndexOf('-');
@@ -85,7 +101,10 @@ public class JTLParser {
             }
         }
 
-        // Second pass: parse, filter, and aggregate (skipping sub-results)
+        // Second pass: parse, filter, aggregate — and track start/end times
+        long testStartMs = Long.MAX_VALUE;
+        long testEndMs   = Long.MIN_VALUE;
+
         try (BufferedReader reader = new BufferedReader(new FileReader(filePath))) {
             String headerLine = reader.readLine();
             if (headerLine == null) {
@@ -111,6 +130,12 @@ public class JTLParser {
                         synchronized (totalCalc) {
                             totalCalc.addSample(sr);
                         }
+
+                        // Track earliest start and latest end
+                        long sampleStart = sr.getTimeStamp();
+                        long sampleEnd   = sampleStart + sr.getTime();
+                        if (sampleStart < testStartMs) testStartMs = sampleStart;
+                        if (sampleEnd > testEndMs)     testEndMs = sampleEnd;
                     }
                 } catch (Exception e) {
                     // Skip malformed lines
@@ -118,12 +143,15 @@ public class JTLParser {
             }
         }
 
-        // Add TOTAL row last (matches Aggregate Report display order)
         if (!results.isEmpty()) {
             results.put(TOTAL_LABEL, totalCalc);
         }
 
-        return results;
+        // Normalize if no samples matched
+        if (testStartMs == Long.MAX_VALUE) testStartMs = 0;
+        if (testEndMs == Long.MIN_VALUE)   testEndMs = 0;
+
+        return new ParseResult(results, testStartMs, testEndMs);
     }
 
     /**
