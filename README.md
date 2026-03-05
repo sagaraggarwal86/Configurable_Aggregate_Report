@@ -65,7 +65,7 @@
 │             [Save Table Data]  ☑ Save Table Header                │
 └───────────────────────────────────────────────────────────────────┘
 
-![Alt text](./img.jpg)
+<img src="img.jpg" alt="Alt text" width="500">
 
 ```
 
