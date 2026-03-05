@@ -3,7 +3,7 @@
     <option name="ALTERNATIVE_JRE_PATH" value="temurin-17" />
     <option name="ALTERNATIVE_JRE_PATH_ENABLED" value="true" />
     <option name="MAIN_CLASS_NAME" value="com.personal.jmeter.UIPreview" />
-    <module name="jmeter-plugin-Config-Aggregate-Report" />
+    <module name="Configurable_Aggregate_Report" />
     <extension name="coverage">
       <pattern>
         <option name="PATTERN" value="com.sagar.jmeter.*" />

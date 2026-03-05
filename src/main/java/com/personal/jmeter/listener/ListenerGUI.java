@@ -858,7 +858,9 @@ public class ListenerGUI extends AbstractVisualizer {
                 StringBuilder hdr = new StringBuilder();
                 for (int i = 0; i < visibleCols.size(); i++) {
                     if (i > 0) hdr.append(",");
-                    hdr.append(ALL_COLUMNS[visibleCols.get(i)]);
+                    // Use the live column header value — this reflects dynamic updates
+                    // such as the percentile label ("50th Percentile(ms)" vs "90th…")
+                    hdr.append(allTableColumns[visibleCols.get(i)].getHeaderValue());
                 }
                 w.write(hdr.toString());
                 w.newLine();

@@ -690,7 +690,9 @@ public class UIPreview {
                 StringBuilder hdr = new StringBuilder();
                 for (int i = 0; i < visibleCols.size(); i++) {
                     if (i > 0) hdr.append(",");
-                    hdr.append(COLUMN_NAMES[visibleCols.get(i)]);
+                    // Use the live column header value — reflects dynamic updates
+                    // such as the percentile label ("50th Percentile(ms)" vs "90th…")
+                    hdr.append(allTableColumns[visibleCols.get(i)].getHeaderValue());
                 }
                 w.write(hdr.toString());
                 w.newLine();
