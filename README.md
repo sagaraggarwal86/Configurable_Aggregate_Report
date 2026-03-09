@@ -1,4 +1,4 @@
-# 📊 Configurable Aggregate Report — JMeter Plugin
+# 📊 Configurable Aggregate Report (AI-Powered) — JMeter Plugin
 
 > A file-based Apache JMeter listener plugin for post-test JTL analysis. Load a results file and get
 > a filterable aggregate table, CSV export, and an AI-generated HTML performance report — with zero runtime overhead.
