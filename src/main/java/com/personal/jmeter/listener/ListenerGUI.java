@@ -15,13 +15,15 @@ import javax.swing.*;
 import java.awt.*;
 import java.io.File;
 import java.util.Enumeration;
+import java.util.Set;
 
 /**
  * JMeter listener plugin — Configurable Aggregate Report.
  *
  * <p>This class handles JMeter-specific integration only:
  * lifecycle callbacks ({@code configure}, {@code modifyTestElement}, {@code clearGui}),
- * hooking the built-in FilePanel, and reading test-plan metadata for the AI report.
+ * hooking the built-in FilePanel (via {@link FilePanelCustomizer}), and reading
+ * test-plan metadata for the AI report.
  * All shared UI and business logic lives in {@link AggregateReportPanel}.</p>
  */
 public class ListenerGUI extends AbstractVisualizer {
@@ -34,6 +36,9 @@ public class ListenerGUI extends AbstractVisualizer {
     // Constructor
     // ─────────────────────────────────────────────────────────────
 
+    /**
+     * Constructs the listener GUI and wires up JMeter integration.
+     */
     public ListenerGUI() {
         super();
         initComponents();
@@ -44,18 +49,6 @@ public class ListenerGUI extends AbstractVisualizer {
     // Layout
     // ─────────────────────────────────────────────────────────────
 
-    private static File resolveStartDirectory(String currentFile) {
-        if (currentFile != null && !currentFile.trim().isEmpty()) {
-            File parent = new File(currentFile).getParentFile();
-            if (parent != null && parent.isDirectory()) return parent;
-        }
-        return new File(System.getProperty("user.dir"));
-    }
-
-    private static String trimOrEmpty(String s) {
-        return s != null ? s.trim() : "";
-    }
-
     private void initComponents() {
         setLayout(new BorderLayout());
 
@@ -63,94 +56,22 @@ public class ListenerGUI extends AbstractVisualizer {
         Container titlePanel = makeTitlePanel();
         add(titlePanel, BorderLayout.NORTH);
 
+        // Build the exclusion set — all reportPanel fields that are editable
+        // must be excluded from hookFilenameField so only the JTL path field is hooked.
+        Set<JTextField> excluded = Set.of(
+                reportPanel.startOffsetField, reportPanel.endOffsetField,
+                reportPanel.percentileField,  reportPanel.startTimeField,
+                reportPanel.endTimeField,     reportPanel.durationField,
+                reportPanel.transactionSearchField);
+
         // Customise the built-in FilePanel: hide irrelevant controls,
         // override Browse to start in the current file's directory,
         // and monitor the filename field for auto-load.
-        hideFilePanelExtras(titlePanel);
-        overrideBrowseButton(titlePanel);
-        hookFilenameField(titlePanel);
+        FilePanelCustomizer.hideFilePanelExtras(titlePanel);
+        FilePanelCustomizer.overrideBrowseButton(titlePanel, getFile(), this::setFile, this);
+        FilePanelCustomizer.hookFilenameField(titlePanel, excluded, this::checkAndLoadFile);
 
         add(reportPanel, BorderLayout.CENTER);
-    }
-
-    /**
-     * Hides the "Log/Display Only", "Errors", "Successes", and "Configure"
-     * controls that AbstractVisualizer's FilePanel adds but are irrelevant here.
-     */
-    private void hideFilePanelExtras(Container container) {
-        for (Component comp : container.getComponents()) {
-            if (comp instanceof JCheckBox cb) {
-                String text = cb.getText();
-                if (text != null && (text.contains("Log")
-                        || text.contains("Errors")
-                        || text.contains("Successes"))) {
-                    cb.setVisible(false);
-                }
-            } else if (comp instanceof JButton btn
-                    && btn.getText() != null
-                    && btn.getText().contains("Configure")) {
-                btn.setVisible(false);
-            } else if (comp instanceof JLabel lbl
-                    && lbl.getText() != null
-                    && (lbl.getText().contains("Log") || lbl.getText().contains("Display"))) {
-                lbl.setVisible(false);
-            }
-            if (comp instanceof Container c) {
-                hideFilePanelExtras(c);
-            }
-        }
-    }
-
-    /**
-     * Replaces the Browse button's action so the file chooser opens in the
-     * directory of the currently selected file.
-     */
-    private void overrideBrowseButton(Container container) {
-        for (Component comp : container.getComponents()) {
-            if (comp instanceof JButton btn && btn.isVisible()
-                    && btn.getText() != null && !btn.getText().contains("Configure")) {
-                for (java.awt.event.ActionListener al : btn.getActionListeners()) {
-                    btn.removeActionListener(al);
-                }
-                btn.addActionListener(e -> {
-                    File startDir = resolveStartDirectory(getFile());
-                    JFileChooser fc = new JFileChooser(startDir);
-                    fc.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter(
-                            "JTL Files (*.jtl)", "jtl"));
-                    fc.setAcceptAllFileFilterUsed(true);
-                    if (fc.showOpenDialog(this) == JFileChooser.APPROVE_OPTION) {
-                        setFile(fc.getSelectedFile().getAbsolutePath());
-                    }
-                });
-            }
-            if (comp instanceof Container c) {
-                overrideBrowseButton(c);
-            }
-        }
-    }
-
-    /**
-     * Walks the component tree to find the filename {@link JTextField} inside
-     * AbstractVisualizer's FilePanel and attaches a listener that triggers
-     * auto-load when the path changes.
-     */
-    private void hookFilenameField(Container container) {
-        for (Component comp : container.getComponents()) {
-            if (comp instanceof JTextField tf && tf.isEditable()
-                    && tf != reportPanel.startOffsetField
-                    && tf != reportPanel.endOffsetField
-                    && tf != reportPanel.percentileField
-                    && tf != reportPanel.startTimeField
-                    && tf != reportPanel.endTimeField
-                    && tf != reportPanel.durationField
-                    && tf != reportPanel.transactionSearchField) {
-                tf.getDocument().addDocumentListener((AggregateReportPanel.SimpleDocListener) () ->
-                        SwingUtilities.invokeLater(this::checkAndLoadFile));
-            }
-            if (comp instanceof Container c) {
-                hookFilenameField(c);
-            }
-        }
     }
 
     // ─────────────────────────────────────────────────────────────
@@ -186,8 +107,8 @@ public class ListenerGUI extends AbstractVisualizer {
     public void modifyTestElement(TestElement el) {
         super.modifyTestElement(el);
         el.setProperty(ListenerCollector.PROP_START_OFFSET, reportPanel.getStartOffset());
-        el.setProperty(ListenerCollector.PROP_END_OFFSET, reportPanel.getEndOffset());
-        el.setProperty(ListenerCollector.PROP_PERCENTILE, reportPanel.getPercentileText());
+        el.setProperty(ListenerCollector.PROP_END_OFFSET,   reportPanel.getEndOffset());
+        el.setProperty(ListenerCollector.PROP_PERCENTILE,   reportPanel.getPercentileText());
     }
 
     @Override
@@ -204,8 +125,8 @@ public class ListenerGUI extends AbstractVisualizer {
         } finally {
             reportPanel.setSuppressReload(false);
         }
-        // hookFilenameField will trigger checkAndLoadFile() via invokeLater
-        // after configure() returns, at which point all filter fields are already set.
+        // hookFilenameField triggers checkAndLoadFile() via invokeLater after configure() returns,
+        // at which point all filter fields are already set.
     }
 
     @Override
@@ -216,6 +137,8 @@ public class ListenerGUI extends AbstractVisualizer {
 
     /**
      * No-op: this plugin processes JTL files only — it does not capture live metrics.
+     *
+     * @param sample ignored
      */
     @Override
     public void add(SampleResult sample) {
@@ -226,6 +149,9 @@ public class ListenerGUI extends AbstractVisualizer {
     // Test-plan metadata for AI report
     // ─────────────────────────────────────────────────────────────
 
+    /**
+     * {@inheritDoc}
+     */
     @Override
     public void clearData() {
         reportPanel.clearAll();
@@ -234,12 +160,14 @@ public class ListenerGUI extends AbstractVisualizer {
     /**
      * Reads scenario name, description, virtual-user count, and first thread-group
      * name from the live JMeter test-plan tree via {@link GuiPackage}.
-     * Returns {@link AggregateReportPanel.ScenarioMetadata#empty()} on any failure.
+     * Returns {@link ScenarioMetadata#empty()} on any failure.
+     *
+     * @return scenario metadata; never null
      */
-    private AggregateReportPanel.ScenarioMetadata readTestPlanMetadata() {
+    private ScenarioMetadata readTestPlanMetadata() {
         try {
             GuiPackage gp = GuiPackage.getInstance();
-            if (gp == null) return AggregateReportPanel.ScenarioMetadata.empty();
+            if (gp == null) return ScenarioMetadata.empty();
 
             JMeterTreeNode root = (JMeterTreeNode) gp.getTreeModel().getRoot();
             Enumeration<?> children = root.children();
@@ -249,17 +177,16 @@ public class ListenerGUI extends AbstractVisualizer {
                 if (el instanceof TestPlan) {
                     String scenarioName = trimOrEmpty(el.getName());
                     String scenarioDesc = trimOrEmpty(el.getComment());
-                    int threadCount = sumThreadCounts(node);
+                    int    threadCount  = sumThreadCounts(node);
                     String threadGrpName = readFirstThreadGroupName(node);
                     String users = threadCount > 0 ? String.valueOf(threadCount) : "";
-                    return new AggregateReportPanel.ScenarioMetadata(
-                            scenarioName, scenarioDesc, users, threadGrpName);
+                    return new ScenarioMetadata(scenarioName, scenarioDesc, users, threadGrpName);
                 }
             }
         } catch (RuntimeException ex) {
             log.warn("readTestPlanMetadata: could not read test plan info. reason={}", ex.getMessage());
         }
-        return AggregateReportPanel.ScenarioMetadata.empty();
+        return ScenarioMetadata.empty();
     }
 
     private int sumThreadCounts(JMeterTreeNode planNode) {
@@ -267,8 +194,7 @@ public class ListenerGUI extends AbstractVisualizer {
         Enumeration<?> children = planNode.children();
         while (children.hasMoreElements()) {
             JMeterTreeNode child = (JMeterTreeNode) children.nextElement();
-            TestElement el = child.getTestElement();
-            if (el instanceof AbstractThreadGroup atg) {
+            if (child.getTestElement() instanceof AbstractThreadGroup atg) {
                 total += atg.getNumThreads();
             }
         }
@@ -279,12 +205,15 @@ public class ListenerGUI extends AbstractVisualizer {
         Enumeration<?> children = planNode.children();
         while (children.hasMoreElements()) {
             JMeterTreeNode child = (JMeterTreeNode) children.nextElement();
-            TestElement el = child.getTestElement();
-            if (el instanceof AbstractThreadGroup) {
-                return trimOrEmpty(el.getName());
+            if (child.getTestElement() instanceof AbstractThreadGroup) {
+                return trimOrEmpty(child.getTestElement().getName());
             }
         }
         return "";
+    }
+
+    private static String trimOrEmpty(String s) {
+        return s != null ? s.trim() : "";
     }
 
     // ─────────────────────────────────────────────────────────────
@@ -294,6 +223,7 @@ public class ListenerGUI extends AbstractVisualizer {
     /**
      * Loads the given JTL file and populates the results table.
      *
+     * @param filePath path to the JTL file
      * @return {@code true} on success, {@code false} on parse error
      */
     public boolean loadJTLFile(String filePath) {
@@ -303,6 +233,8 @@ public class ListenerGUI extends AbstractVisualizer {
     /**
      * Exposes the filter options for integration tests that need to verify
      * the parsed options without going through the full load flow.
+     *
+     * @return current filter options built from the UI fields
      */
     public JTLParser.FilterOptions buildFilterOptions() {
         return reportPanel.buildFilterOptions();
