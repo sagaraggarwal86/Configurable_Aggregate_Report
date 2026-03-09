@@ -233,3 +233,6 @@ Please test with JMeter 5.6+ on Windows, macOS, and Linux.
 ## 📄 License
 
 Apache License 2.0 — see [LICENSE](LICENSE) for details.
+
+## 👋 Visitors
+![](https://komarev.com/ghpvc/?username=sagaraggarwal86)
