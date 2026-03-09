@@ -29,11 +29,11 @@
 1. Download the latest JAR from
    the [GitHub Releases](https://github.com/sagaraggarwal86/Configurable_Aggregate_Report/releases) page or click here
    to download
-   instantly [latest JAR](https://github.com/sagaraggarwal86/Configurable_Aggregate_Report/releases/download/v2.1.0/Configurable_Aggregate_Report-2.1.0.jar)
+   instantly [latest JAR](https://github.com/sagaraggarwal86/Configurable_Aggregate_Report/releases/download/v2.1.0/Configurable_Aggregate_Report-2.5.0.jar)
 
 3. Copy it to your JMeter `lib/ext/` directory:
    ```
-   <JMETER_HOME>/lib/ext/Configurable_Aggregate_Report-2.1.0.jar
+   <JMETER_HOME>/lib/ext/Configurable_Aggregate_Report-2.5.0.jar
    ```
 4. Restart JMeter
 
@@ -45,7 +45,7 @@
 git clone https://github.com/sagaraggarwal86/Configurable_Aggregate_Report.git
 cd Configurable_Aggregate_Report
 mvn clean package
-cp target/Configurable_Aggregate_Report-2.1.0.jar $JMETER_HOME/lib/ext/
+cp target/Configurable_Aggregate_Report-2.5.0.jar $JMETER_HOME/lib/ext/
 ```
 
 > **Publishing to Maven Central** requires the `release` profile (sources JAR, Javadoc JAR, GPG signing):
