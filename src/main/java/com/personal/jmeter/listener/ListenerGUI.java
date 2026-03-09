@@ -44,6 +44,18 @@ public class ListenerGUI extends AbstractVisualizer {
     // Layout
     // ─────────────────────────────────────────────────────────────
 
+    private static File resolveStartDirectory(String currentFile) {
+        if (currentFile != null && !currentFile.trim().isEmpty()) {
+            File parent = new File(currentFile).getParentFile();
+            if (parent != null && parent.isDirectory()) return parent;
+        }
+        return new File(System.getProperty("user.dir"));
+    }
+
+    private static String trimOrEmpty(String s) {
+        return s != null ? s.trim() : "";
+    }
+
     private void initComponents() {
         setLayout(new BorderLayout());
 
@@ -141,6 +153,10 @@ public class ListenerGUI extends AbstractVisualizer {
         }
     }
 
+    // ─────────────────────────────────────────────────────────────
+    // AbstractVisualizer contract
+    // ─────────────────────────────────────────────────────────────
+
     private void checkAndLoadFile() {
         String filename = getFile();
         if (filename != null && !filename.trim().isEmpty()
@@ -148,18 +164,6 @@ public class ListenerGUI extends AbstractVisualizer {
             reportPanel.loadJtlFile(filename);
         }
     }
-
-    private static File resolveStartDirectory(String currentFile) {
-        if (currentFile != null && !currentFile.trim().isEmpty()) {
-            File parent = new File(currentFile).getParentFile();
-            if (parent != null && parent.isDirectory()) return parent;
-        }
-        return new File(System.getProperty("user.dir"));
-    }
-
-    // ─────────────────────────────────────────────────────────────
-    // AbstractVisualizer contract
-    // ─────────────────────────────────────────────────────────────
 
     @Override
     public String getLabelResource() {
@@ -182,8 +186,8 @@ public class ListenerGUI extends AbstractVisualizer {
     public void modifyTestElement(TestElement el) {
         super.modifyTestElement(el);
         el.setProperty(ListenerCollector.PROP_START_OFFSET, reportPanel.getStartOffset());
-        el.setProperty(ListenerCollector.PROP_END_OFFSET,   reportPanel.getEndOffset());
-        el.setProperty(ListenerCollector.PROP_PERCENTILE,   reportPanel.getPercentileText());
+        el.setProperty(ListenerCollector.PROP_END_OFFSET, reportPanel.getEndOffset());
+        el.setProperty(ListenerCollector.PROP_PERCENTILE, reportPanel.getPercentileText());
     }
 
     @Override
@@ -210,20 +214,22 @@ public class ListenerGUI extends AbstractVisualizer {
         reportPanel.clearAll();
     }
 
-    /** No-op: this plugin processes JTL files only — it does not capture live metrics. */
+    /**
+     * No-op: this plugin processes JTL files only — it does not capture live metrics.
+     */
     @Override
     public void add(SampleResult sample) {
         // Intentionally empty
     }
 
+    // ─────────────────────────────────────────────────────────────
+    // Test-plan metadata for AI report
+    // ─────────────────────────────────────────────────────────────
+
     @Override
     public void clearData() {
         reportPanel.clearAll();
     }
-
-    // ─────────────────────────────────────────────────────────────
-    // Test-plan metadata for AI report
-    // ─────────────────────────────────────────────────────────────
 
     /**
      * Reads scenario name, description, virtual-user count, and first thread-group
@@ -241,17 +247,17 @@ public class ListenerGUI extends AbstractVisualizer {
                 JMeterTreeNode node = (JMeterTreeNode) children.nextElement();
                 TestElement el = node.getTestElement();
                 if (el instanceof TestPlan) {
-                    String scenarioName   = trimOrEmpty(el.getName());
-                    String scenarioDesc   = trimOrEmpty(el.getComment());
-                    int    threadCount    = sumThreadCounts(node);
-                    String threadGrpName  = readFirstThreadGroupName(node);
-                    String users          = threadCount > 0 ? String.valueOf(threadCount) : "";
+                    String scenarioName = trimOrEmpty(el.getName());
+                    String scenarioDesc = trimOrEmpty(el.getComment());
+                    int threadCount = sumThreadCounts(node);
+                    String threadGrpName = readFirstThreadGroupName(node);
+                    String users = threadCount > 0 ? String.valueOf(threadCount) : "";
                     return new AggregateReportPanel.ScenarioMetadata(
                             scenarioName, scenarioDesc, users, threadGrpName);
                 }
             }
-        } catch (Exception ex) {
-            log.warn("Could not read test plan info: {}", ex.getMessage());
+        } catch (RuntimeException ex) {
+            log.warn("readTestPlanMetadata: could not read test plan info. reason={}", ex.getMessage());
         }
         return AggregateReportPanel.ScenarioMetadata.empty();
     }
@@ -279,10 +285,6 @@ public class ListenerGUI extends AbstractVisualizer {
             }
         }
         return "";
-    }
-
-    private static String trimOrEmpty(String s) {
-        return s != null ? s.trim() : "";
     }
 
     // ─────────────────────────────────────────────────────────────

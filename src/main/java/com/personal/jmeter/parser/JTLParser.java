@@ -2,12 +2,14 @@ package com.personal.jmeter.parser;
 
 import org.apache.jmeter.samplers.SampleResult;
 import org.apache.jmeter.visualizers.SamplingStatCalculator;
-
-
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.BufferedReader;
-import java.io.FileReader;
+import java.io.FileInputStream;
 import java.io.IOException;
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
 import java.util.*;
 
 /**
@@ -20,10 +22,10 @@ import java.util.*;
  */
 public class JTLParser {
 
+    private static final Logger log = LoggerFactory.getLogger(JTLParser.class);
 
-
-    private static final String TOTAL_LABEL    = "TOTAL";
-    private static final long   BUCKET_SIZE_MS = 30_000L;
+    private static final String TOTAL_LABEL = "TOTAL";
+    private static final long BUCKET_SIZE_MS = 30_000L;
 
     // ─────────────────────────────────────────────────────────────
     // Public API
@@ -32,23 +34,30 @@ public class JTLParser {
     /**
      * Parses a JTL file and returns aggregated results with time metadata.
      *
-     * @param filePath path to the JTL CSV file
-     * @param options  filter and display options (mutated: minTimestamp is set)
+     * @param filePath path to the JTL CSV file; must not be null
+     * @param options  filter and display options (mutated: minTimestamp is set); must not be null
      * @return {@link ParseResult} containing per-label stats, time range, and time buckets
-     * @throws IOException if the file cannot be read or is empty
+     * @throws IOException              if the file cannot be read or is empty
+     * @throws IllegalArgumentException if filePath or options is null
      */
     public ParseResult parse(String filePath, FilterOptions options) throws IOException {
-        // ── Pass 1: discover labels and minimum timestamp ────────
-        Set<String>  allLabels    = new HashSet<>();
-        long         minTimestamp = Long.MAX_VALUE;
+        Objects.requireNonNull(filePath, "filePath must not be null");
+        Objects.requireNonNull(options, "options must not be null");
 
-        try (BufferedReader reader = new BufferedReader(new FileReader(filePath))) {
+        log.info("parse: starting. filePath={}", filePath);
+
+        // ── Pass 1: discover labels and minimum timestamp ────────
+        Set<String> allLabels = new HashSet<>();
+        long minTimestamp = Long.MAX_VALUE;
+
+        try (BufferedReader reader = new BufferedReader(
+                new InputStreamReader(new FileInputStream(filePath), StandardCharsets.UTF_8))) {
             String headerLine = reader.readLine();
             if (headerLine == null) {
                 throw new IOException("JTL file is empty: " + filePath);
             }
             Map<String, Integer> colMap = buildColumnMap(headerLine.split(","));
-            Integer tsIdx    = colMap.get("timeStamp");
+            Integer tsIdx = colMap.get("timeStamp");
             Integer labelIdx = colMap.get("label");
 
             String line;
@@ -64,28 +73,27 @@ public class JTLParser {
                             minTimestamp = ts;
                         }
                     } catch (NumberFormatException e) {
-                        // non-numeric timeStamp — skip silently
+                        if (log.isDebugEnabled()) {
+                            log.debug("parse: non-numeric timeStamp value skipped. value={}", values[tsIdx]);
+                        }
                     }
                 }
             }
         }
         options.minTimestamp = (minTimestamp == Long.MAX_VALUE) ? 0 : minTimestamp;
 
-        // Labels whose suffix is a number AND whose prefix is also a known label
-        // are sub-results (e.g. "Login-1" when "Login" also exists) — skip them
-        // to avoid double-counting nested samplers.
         Set<String> subResultLabels = buildSubResultLabels(allLabels);
 
         // ── Pass 2: aggregate ────────────────────────────────────
-        Map<String, SamplingStatCalculator> results   = new LinkedHashMap<>();
-        SamplingStatCalculator              totalCalc = new SamplingStatCalculator(TOTAL_LABEL);
+        Map<String, SamplingStatCalculator> results = new LinkedHashMap<>();
+        SamplingStatCalculator totalCalc = new SamplingStatCalculator(TOTAL_LABEL);
         long testStartMs = Long.MAX_VALUE;
-        long testEndMs   = Long.MIN_VALUE;
+        long testEndMs = Long.MIN_VALUE;
 
-        // bucketKey (epoch-ms rounded to BUCKET_SIZE_MS) → { sumElapsed, count, errors, bytes }
         TreeMap<Long, long[]> bucketMap = new TreeMap<>();
 
-        try (BufferedReader reader = new BufferedReader(new FileReader(filePath))) {
+        try (BufferedReader reader = new BufferedReader(
+                new InputStreamReader(new FileInputStream(filePath), StandardCharsets.UTF_8))) {
             String headerLine = reader.readLine();
             if (headerLine == null) {
                 throw new IOException("JTL file is empty: " + filePath);
@@ -106,9 +114,9 @@ public class JTLParser {
                 totalCalc.addSample(sr);
 
                 long sampleStart = sr.getTimeStamp();
-                long sampleEnd   = sampleStart + sr.getTime();
+                long sampleEnd = sampleStart + sr.getTime();
                 if (sampleStart < testStartMs) testStartMs = sampleStart;
-                if (sampleEnd   > testEndMs)   testEndMs   = sampleEnd;
+                if (sampleEnd > testEndMs) testEndMs = sampleEnd;
 
                 long bucketKey = (sampleStart / BUCKET_SIZE_MS) * BUCKET_SIZE_MS;
                 long[] acc = bucketMap.computeIfAbsent(bucketKey, k -> new long[4]);
@@ -124,9 +132,11 @@ public class JTLParser {
         }
 
         if (testStartMs == Long.MAX_VALUE) testStartMs = 0;
-        if (testEndMs   == Long.MIN_VALUE) testEndMs   = 0;
+        if (testEndMs == Long.MIN_VALUE) testEndMs = 0;
 
         List<TimeBucket> timeBuckets = buildTimeBuckets(bucketMap);
+        log.info("parse: completed. labels={}, samples={}, buckets={}",
+                results.size(), totalCalc.getCount(), timeBuckets.size());
         return new ParseResult(results, testStartMs, testEndMs, timeBuckets);
     }
 
@@ -159,14 +169,14 @@ public class JTLParser {
      */
     private List<TimeBucket> buildTimeBuckets(TreeMap<Long, long[]> bucketMap) {
         List<TimeBucket> list = new ArrayList<>(bucketMap.size());
-        double bucketSecs = BUCKET_SIZE_MS / 1000.0;
+        double bucketSec = BUCKET_SIZE_MS / 1000.0;
         for (Map.Entry<Long, long[]> e : bucketMap.entrySet()) {
-            long[]  acc   = e.getValue();
-            long    count = acc[1];
-            double  avgRt = count > 0 ? (double) acc[0] / count : 0.0;
-            double  errPct = count > 0 ? (double) acc[2] / count * 100.0 : 0.0;
-            double  tps   = count / bucketSecs;
-            double  kbps  = (double) acc[3] / bucketSecs / 1024.0;
+            long[] acc = e.getValue();
+            long count = acc[1];
+            double avgRt = count > 0 ? (double) acc[0] / count : 0.0;
+            double errPct = count > 0 ? (double) acc[2] / count * 100.0 : 0.0;
+            double tps = count / bucketSec;
+            double kbps = (double) acc[3] / bucketSec / 1024.0;
             list.add(new TimeBucket(e.getKey(), avgRt, errPct, tps, kbps));
         }
         return list;
@@ -207,7 +217,9 @@ public class JTLParser {
             sr.setConnectTime(getLong(v, colMap, "Connect", 0));
             return sr;
         } catch (IllegalArgumentException e) {
-            // malformed line — skip silently
+            if (log.isDebugEnabled()) {
+                log.debug("parseLine: malformed CSV line skipped. reason={}", e.getMessage());
+            }
             return null;
         }
     }
@@ -216,14 +228,13 @@ public class JTLParser {
      * Splits a CSV line while respecting double-quoted fields that may contain commas.
      */
     private String[] splitCsvLine(String line) {
-        List<String> fields  = new ArrayList<>();
+        List<String> fields = new ArrayList<>();
         StringBuilder current = new StringBuilder();
         boolean inQuotes = false;
 
         for (int i = 0; i < line.length(); i++) {
             char c = line.charAt(i);
             if (c == '"') {
-                // Handle escaped quote ("")
                 if (inQuotes && i + 1 < line.length() && line.charAt(i + 1) == '"') {
                     current.append('"');
                     i++;
@@ -259,7 +270,7 @@ public class JTLParser {
         if (options.startOffset > 0 || options.endOffset > 0) {
             long relativeSec = (sr.getTimeStamp() - options.minTimestamp) / 1000L;
             if (options.startOffset > 0 && relativeSec < options.startOffset) return false;
-            if (options.endOffset   > 0 && relativeSec > options.endOffset)   return false;
+            if (options.endOffset > 0 && relativeSec > options.endOffset) return false;
         }
         return true;
     }
@@ -294,7 +305,7 @@ public class JTLParser {
      */
     private boolean isPositiveInteger(String str) {
         if (str == null || str.isEmpty()) {
-            return false;   // FIX: empty string is not a valid numeric suffix
+            return false;
         }
         for (int i = 0; i < str.length(); i++) {
             if (!Character.isDigit(str.charAt(i))) return false;
@@ -306,52 +317,125 @@ public class JTLParser {
     // Public data classes
     // ─────────────────────────────────────────────────────────────
 
-    /** Aggregated parse output: stats map, wall-clock range, and time-series buckets. */
+    /**
+     * Aggregated parse output: stats map, wall-clock range, and time-series buckets.
+     */
     public static class ParseResult {
+        /**
+         * Per-label aggregated statistics.
+         */
         public final Map<String, SamplingStatCalculator> results;
-        public final long                startTimeMs;
-        public final long                endTimeMs;
-        public final long                durationMs;
-        public final List<TimeBucket>    timeBuckets;
+        /**
+         * Epoch millis of the first sample timestamp.
+         */
+        public final long startTimeMs;
+        /**
+         * Epoch millis of the last sample end (timestamp + elapsed).
+         */
+        public final long endTimeMs;
+        /**
+         * Total test duration in milliseconds.
+         */
+        public final long durationMs;
+        /**
+         * Ordered list of 30-second time buckets.
+         */
+        public final List<TimeBucket> timeBuckets;
 
+        /**
+         * Constructs a parse result.
+         *
+         * @param results     per-label aggregated statistics
+         * @param startTimeMs epoch millis of first sample
+         * @param endTimeMs   epoch millis of last sample end
+         * @param timeBuckets ordered list of 30-second time buckets
+         */
         public ParseResult(Map<String, SamplingStatCalculator> results,
                            long startTimeMs, long endTimeMs,
                            List<TimeBucket> timeBuckets) {
-            this.results     = results;
+            this.results = results;
             this.startTimeMs = startTimeMs;
-            this.endTimeMs   = endTimeMs;
-            this.durationMs  = Math.max(0, endTimeMs - startTimeMs);
+            this.endTimeMs = endTimeMs;
+            this.durationMs = Math.max(0, endTimeMs - startTimeMs);
             this.timeBuckets = timeBuckets != null ? timeBuckets : Collections.emptyList();
         }
     }
 
-    /** Aggregated metrics for a single 30-second time bucket. */
+    /**
+     * Aggregated metrics for a single 30-second time bucket.
+     */
     public static class TimeBucket {
-        public final long   epochMs;
+        /**
+         * Epoch millis representing the start of the bucket.
+         */
+        public final long epochMs;
+        /**
+         * Average response time in milliseconds for this bucket.
+         */
         public final double avgResponseMs;
+        /**
+         * Percentage of failed requests in this bucket.
+         */
         public final double errorPct;
+        /**
+         * Transactions per second in this bucket.
+         */
         public final double tps;
+        /**
+         * Kilobytes per second received in this bucket.
+         */
         public final double kbps;
 
+        /**
+         * Constructs a time bucket.
+         *
+         * @param epochMs       epoch millis representing the start of the bucket
+         * @param avgResponseMs average response time in milliseconds
+         * @param errorPct      percentage of failed requests
+         * @param tps           transactions per second
+         * @param kbps          kilobytes per second received
+         */
         public TimeBucket(long epochMs, double avgResponseMs,
                           double errorPct, double tps, double kbps) {
-            this.epochMs       = epochMs;
+            this.epochMs = epochMs;
             this.avgResponseMs = avgResponseMs;
-            this.errorPct      = errorPct;
-            this.tps           = tps;
-            this.kbps          = kbps;
+            this.errorPct = errorPct;
+            this.tps = tps;
+            this.kbps = kbps;
         }
     }
 
-    /** Filter and display options passed to {@link #parse}. */
+    /**
+     * Filter and display options passed to {@link #parse}.
+     */
     public static class FilterOptions {
-        public String  includeLabels = "";
-        public String  excludeLabels = "";
-        public boolean regExp        = false;
-        public int     startOffset   = 0;
-        public int     endOffset     = 0;
-        public int     percentile    = 90;
-        /** Set internally during parse — tracks the test start timestamp. */
-        public long    minTimestamp  = 0;
+        /**
+         * Label substring or regex to include; blank means include all.
+         */
+        public String includeLabels = "";
+        /**
+         * Label substring or regex to exclude; blank means exclude none.
+         */
+        public String excludeLabels = "";
+        /**
+         * If {@code true}, treat include/exclude patterns as regular expressions.
+         */
+        public boolean regExp = false;
+        /**
+         * Seconds from test start to begin including samples.
+         */
+        public int startOffset = 0;
+        /**
+         * Seconds from test start to stop including samples (0 = no limit).
+         */
+        public int endOffset = 0;
+        /**
+         * Percentile to calculate (1–99).
+         */
+        public int percentile = 90;
+        /**
+         * Set internally during parse — tracks the test start timestamp.
+         */
+        public long minTimestamp = 0;
     }
 }

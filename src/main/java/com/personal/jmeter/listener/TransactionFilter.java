@@ -18,7 +18,9 @@ import java.util.regex.PatternSyntaxException;
  */
 public final class TransactionFilter {
 
-    /** Maximum number of compiled patterns held in the cache before it is cleared. */
+    /**
+     * Maximum number of compiled patterns held in the cache before it is cleared.
+     */
     private static final int MAX_CACHE_SIZE = 100;
 
     /**

@@ -1,13 +1,11 @@
 <component name="ProjectRunConfigurationManager">
-  <configuration default="false" name="UI Preview" type="Application" factoryName="Application">
-    <option name="ALTERNATIVE_JRE_PATH" value="temurin-17" />
-    <option name="ALTERNATIVE_JRE_PATH_ENABLED" value="true" />
+  <configuration default="false" name="UIPreview" type="Application" factoryName="Application" nameIsGenerated="true">
     <option name="INCLUDE_PROVIDED_SCOPE" value="true" />
     <option name="MAIN_CLASS_NAME" value="com.personal.jmeter.UIPreview" />
     <module name="Configurable_Aggregate_Report" />
     <extension name="coverage">
       <pattern>
-        <option name="PATTERN" value="com.sagar.jmeter.*" />
+        <option name="PATTERN" value="com.personal.jmeter.*" />
         <option name="ENABLED" value="true" />
       </pattern>
     </extension>

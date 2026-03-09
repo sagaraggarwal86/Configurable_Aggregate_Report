@@ -7,7 +7,6 @@
         <sourceTestOutputDir name="target/generated-test-sources/test-annotations" />
         <outputRelativeToContentRoot value="true" />
         <module name="Configurable_Aggregate_Report" />
-        <module name="jmeter-sample-plugin" />
       </profile>
     </annotationProcessing>
   </component>

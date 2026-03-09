@@ -27,11 +27,6 @@ class HtmlTransactionTableTest {
 
     private HtmlReportRenderer renderer;
 
-    @BeforeEach
-    void setUp() {
-        renderer = new HtmlReportRenderer();
-    }
-
     /**
      * Safe helper that builds a {@code List<String[]>} without triggering the
      * varargs-vs-array type-inference ambiguity present in {@code List.of} and
@@ -44,6 +39,11 @@ class HtmlTransactionTableTest {
             list.add(r);
         }
         return list;
+    }
+
+    @BeforeEach
+    void setUp() {
+        renderer = new HtmlReportRenderer();
     }
 
     // ─────────────────────────────────────────────────────────────
@@ -152,7 +152,7 @@ class HtmlTransactionTableTest {
         @DisplayName("multiple rows — both transactions appear")
         void multipleRowsBothPresent() {
             String html = renderer.buildTransactionMetricsSection(rows(
-                    new String[]{"Login",    "200", "198", "2", "100", "50", "400",
+                    new String[]{"Login", "200", "198", "2", "100", "50", "400",
                             "180", "22.0", "1.00%", "10.0/sec"},
                     new String[]{"Checkout", "100", "100", "0", "350", "200", "800",
                             "600", "60.0", "0.00%", "5.0/sec"}
@@ -168,9 +168,9 @@ class HtmlTransactionTableTest {
                     new String[]{"<Script> & 'Test'", "1", "1", "0",
                             "200", "200", "200", "200", "0.0", "0.00%", "1.0/sec"}
             ));
-            assertFalse(html.contains("<Script>"),      "Raw <Script> tag must be escaped");
+            assertFalse(html.contains("<Script>"), "Raw <Script> tag must be escaped");
             assertTrue(html.contains("&lt;Script&gt;"), "Expected HTML-escaped tag");
-            assertTrue(html.contains("&amp;"),          "Expected &amp; for &");
+            assertTrue(html.contains("&amp;"), "Expected &amp; for &");
         }
 
         @Test

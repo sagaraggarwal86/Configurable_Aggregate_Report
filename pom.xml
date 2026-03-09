@@ -6,7 +6,7 @@
     <modelVersion>4.0.0</modelVersion>
     <groupId>io.github.sagaraggarwal86</groupId>
     <artifactId>Configurable_Aggregate_Report</artifactId>
-    <version>2.0.0</version>
+    <version>2.1.0</version>
     <packaging>jar</packaging>
     <name>Configurable Aggregate Report Plugin</name>
     <description>A listener plugin to prepare report for configurable parameters for Apache JMeter</description>
@@ -172,9 +172,9 @@
         </dependency>
 
         <dependency>
-            <groupId>org.slf4j</groupId>
-            <artifactId>slf4j-simple</artifactId>
-            <version>2.0.17</version>
+            <groupId>ch.qos.logback</groupId>
+            <artifactId>logback-classic</artifactId>
+            <version>1.5.6</version>
             <scope>test</scope>
         </dependency>
 
@@ -277,7 +277,7 @@
                 </configuration>
             </plugin>
 
-            <!-- exec:java uses the test classpath so that slf4j-simple (test scope)
+            <!-- exec:java uses the test classpath so that logback-classic (test scope)
                  is available when running UIPreview standalone.
                  Without this, slf4j-api has no provider and emits NOP warnings. -->
             <plugin>
@@ -328,8 +328,10 @@
                             </filters>
                             <transformers>
                                 <!-- Generates a valid merged MANIFEST.MF in the shaded JAR -->
-                                <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer"/>
-                                <transformer implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer"/>
+                                <transformer
+                                        implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer"/>
+                                <transformer
+                                        implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer"/>
                             </transformers>
                         </configuration>
                     </execution>
