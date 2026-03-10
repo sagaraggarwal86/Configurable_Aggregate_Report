@@ -25,31 +25,6 @@ final class JtlParserCore {
     // Label helpers
     // ─────────────────────────────────────────────────────────────
 
-    /**
-     * Returns the set of labels that are sub-results of a parent label.
-     *
-     * <p>A label {@code "Foo-3"} is a sub-result when both {@code "Foo"} and
-     * {@code "Foo-3"} exist in {@code allLabels} and {@code "3"} is a
-     * non-empty all-digit suffix.</p>
-     *
-     * @param allLabels all label strings seen in Pass 1
-     * @return labels to exclude during Pass 2 aggregation
-     */
-    static Set<String> buildSubResultLabels(Set<String> allLabels) {
-        Set<String> subResults = new HashSet<>();
-        for (String label : allLabels) {
-            int lastDash = label.lastIndexOf('-');
-            if (lastDash > 0 && lastDash < label.length() - 1) {
-                String suffix = label.substring(lastDash + 1);
-                String parent = label.substring(0, lastDash);
-                if (isPositiveInteger(suffix) && allLabels.contains(parent)) {
-                    subResults.add(label);
-                }
-            }
-        }
-        return subResults;
-    }
-
     // ─────────────────────────────────────────────────────────────
     // Bucket helpers
     // ─────────────────────────────────────────────────────────────
@@ -62,7 +37,7 @@ final class JtlParserCore {
      * @return ordered list of time buckets
      */
     static List<JTLParser.TimeBucket> buildTimeBuckets(TreeMap<Long, long[]> bucketMap,
-                                                        long bucketSizeMs) {
+                                                       long bucketSizeMs) {
         List<JTLParser.TimeBucket> list = new ArrayList<>(bucketMap.size());
         double bucketSec = bucketSizeMs / 1000.0;
         for (Map.Entry<Long, long[]> e : bucketMap.entrySet()) {
@@ -109,8 +84,10 @@ final class JtlParserCore {
             String[] v = splitCsvLine(line);
             SampleResult sr = new SampleResult();
             sr.setTimeStamp(getLong(v, colMap, "timeStamp", 0));
-            long elapsed = getLong(v, colMap, "elapsed", 0);
-            sr.setStampAndTime(sr.getTimeStamp(), elapsed);
+            // NOTE: setStampAndTime() is intentionally NOT called here.
+            // The caller (JTLParser.parse) calls it exactly once, after optionally
+            // adjusting the elapsed value, to avoid the IllegalStateException that
+            // SampleResult throws when setStampAndTime() is called more than once.
             sr.setSampleLabel(getString(v, colMap, "label", "unknown"));
             sr.setResponseCode(getString(v, colMap, "responseCode", ""));
             sr.setResponseMessage(getString(v, colMap, "responseMessage", ""));
@@ -132,7 +109,21 @@ final class JtlParserCore {
     }
 
     /**
-     * Splits a CSV line while respecting double-quoted fields that may contain commas.
+     * Extracts the raw {@code elapsed} value from a CSV line.
+     * Companion to {@link #parseLine} — used by the caller to obtain elapsed
+     * before calling {@code SampleResult.setStampAndTime()} exactly once.
+     *
+     * @param line   one CSV data line (not the header)
+     * @param colMap column-name-to-index map built by {@link #buildColumnMap}
+     * @return elapsed in milliseconds, or {@code 0} if absent/malformed
+     */
+    static long parseElapsed(String line, Map<String, Integer> colMap) {
+        if (line == null || line.isBlank()) return 0;
+        String[] v = splitCsvLine(line);
+        return getLong(v, colMap, "elapsed", 0);
+    }
+
+    /**
      *
      * @param line raw CSV line
      * @return array of unquoted, trimmed field values
@@ -221,18 +212,4 @@ final class JtlParserCore {
         }
     }
 
-    /**
-     * Returns {@code true} only when {@code str} is non-null, non-empty,
-     * and consists entirely of decimal digits.
-     *
-     * @param str string to test
-     * @return {@code true} if {@code str} is a positive integer string
-     */
-    static boolean isPositiveInteger(String str) {
-        if (str == null || str.isEmpty()) return false;
-        for (int i = 0; i < str.length(); i++) {
-            if (!Character.isDigit(str.charAt(i))) return false;
-        }
-        return true;
-    }
 }

@@ -48,40 +48,104 @@ public class JTLParser {
 
         log.info("parse: starting. filePath={}", filePath);
 
-        // ── Pass 1: discover labels and minimum timestamp ────────
-        Set<String> allLabels = new HashSet<>();
-        long minTimestamp = Long.MAX_VALUE;
+        // ── Pass 1: discover labels, minimum timestamp, and sub-result labels ────
+        //
+        // Sub-result detection uses the consecutive-row algorithm that mirrors how
+        // JMeter writes Transaction Controller results to the JTL:
+        //
+        //   When "Generate Parent Sample" is ON, JMeter writes the Transaction
+        //   Controller row (dataType = "") immediately before its child HTTP sample
+        //   (dataType = "text") and gives both the identical timeStamp and elapsed.
+        //
+        //   A row whose label is preceded in the file by such a controller row is
+        //   a sub-result and should be excluded when generateParentSample = true.
+        //
+        // This is distinct from the old numeric-suffix heuristic ("Foo-1", "Foo-2"),
+        // which does not apply to Transaction Controller parent-child pairs.
+        Set<String> allLabels        = new HashSet<>();
+        Set<String> subResultLabels  = new HashSet<>();
+        long        minTimestamp     = Long.MAX_VALUE;
 
         try (BufferedReader reader = new BufferedReader(
                 new InputStreamReader(new FileInputStream(filePath), StandardCharsets.UTF_8))) {
             String headerLine = reader.readLine();
             if (headerLine == null) throw new IOException("JTL file is empty: " + filePath);
 
-            Map<String, Integer> colMap = JtlParserCore.buildColumnMap(headerLine.split(","));
-            Integer tsIdx    = colMap.get("timeStamp");
-            Integer labelIdx = colMap.get("label");
-            String line;
+            Map<String, Integer> colMap     = JtlParserCore.buildColumnMap(headerLine.split(","));
+            Integer tsIdx       = colMap.get("timeStamp");
+            Integer labelIdx    = colMap.get("label");
+            Integer elapsedIdx  = colMap.get("elapsed");
+            Integer dataTypeIdx = colMap.get("dataType");
 
+            // Previous-row fields for consecutive-row detection
+            String prevTs = null, prevElapsed = null, prevDataType = null;
+
+            String line;
             while ((line = reader.readLine()) != null) {
                 String[] values = JtlParserCore.splitCsvLine(line);
-                if (labelIdx != null && labelIdx < values.length) {
-                    allLabels.add(values[labelIdx].trim());
-                }
-                if (tsIdx != null && tsIdx < values.length) {
+
+                String label    = (labelIdx    != null && labelIdx    < values.length) ? values[labelIdx].trim()    : "";
+                String ts       = (tsIdx       != null && tsIdx       < values.length) ? values[tsIdx].trim()       : "";
+                String elapsed  = (elapsedIdx  != null && elapsedIdx  < values.length) ? values[elapsedIdx].trim()  : "";
+                String dataType = (dataTypeIdx != null && dataTypeIdx < values.length) ? values[dataTypeIdx].trim() : "";
+
+                // Detect sub-result: prev row is a Transaction Controller (empty
+                // dataType), this row is its child (non-empty dataType), both share
+                // the same elapsed, and their timestamps are within 1 ms of each
+                // other.  JMeter's Transaction Controller writes its parent row
+                // immediately before the child with matching elapsed; the timestamps
+                // are nominally identical but can differ by ±1 ms due to
+                // sub-millisecond scheduling jitter on busy systems.
+                if (options.generateParentSample
+                        && prevDataType != null
+                        && prevDataType.isEmpty()
+                        && !dataType.isEmpty()
+                        && !ts.isEmpty()
+                        && !prevTs.isEmpty()
+                        && elapsed.equals(prevElapsed)) {
                     try {
-                        long ts = Long.parseLong(values[tsIdx].trim());
-                        if (ts > 0 && ts < minTimestamp) minTimestamp = ts;
+                        if (Math.abs(Long.parseLong(ts) - Long.parseLong(prevTs)) <= 1) {
+                            subResultLabels.add(label);
+                        }
+                    } catch (NumberFormatException ignored) { /* skip malformed ts */ }
+                }
+
+                if (!label.isEmpty()) allLabels.add(label);
+
+                if (!ts.isEmpty()) {
+                    try {
+                        long tsLong = Long.parseLong(ts);
+                        if (tsLong > 0 && tsLong < minTimestamp) minTimestamp = tsLong;
                     } catch (NumberFormatException e) {
                         if (log.isDebugEnabled()) {
-                            log.debug("parse: non-numeric timeStamp skipped. value={}", values[tsIdx]);
+                            log.debug("parse: non-numeric timeStamp skipped. value={}", ts);
                         }
                     }
                 }
+
+                prevTs       = ts;
+                prevElapsed  = elapsed;
+                prevDataType = dataType;
             }
         }
         options.minTimestamp = (minTimestamp == Long.MAX_VALUE) ? 0 : minTimestamp;
 
-        Set<String> subResultLabels = JtlParserCore.buildSubResultLabels(allLabels);
+        // Numeric-suffix sub-result detection: "Foo-1", "Foo-2" are sub-results when
+        // their parent label "Foo" also appears in the JTL (e.g. JMeter HTTP samplers
+        // inside a Transaction Controller with Generate Parent Sample OFF, or any
+        // sampler family that writes numbered child rows alongside a root row).
+        for (String candidate : allLabels) {
+            int dashIdx = candidate.lastIndexOf('-');
+            if (dashIdx > 0 && dashIdx < candidate.length() - 1) {
+                String suffix = candidate.substring(dashIdx + 1);
+                String parent = candidate.substring(0, dashIdx);
+                if (!suffix.isEmpty()
+                        && suffix.chars().allMatch(Character::isDigit)
+                        && allLabels.contains(parent)) {
+                    subResultLabels.add(candidate);
+                }
+            }
+        }
 
         // ── Pass 2: aggregate ────────────────────────────────────
         Map<String, SamplingStatCalculator> results = new LinkedHashMap<>();
@@ -105,6 +169,15 @@ public class JTLParser {
                         || !JtlParserCore.shouldInclude(sr, options)) {
                     continue;
                 }
+
+                // Compute elapsed; optionally subtract IdleTime (timers / pre-post
+                // processors) before calling setStampAndTime — which must be called
+                // exactly once on a SampleResult.
+                long rawElapsed = JtlParserCore.parseElapsed(line, colMap);
+                long adjusted   = (!options.includeTimerDuration && sr.getIdleTime() > 0)
+                        ? Math.max(0L, rawElapsed - sr.getIdleTime())
+                        : rawElapsed;
+                sr.setStampAndTime(sr.getTimeStamp(), adjusted);
 
                 String label = sr.getSampleLabel();
                 results.computeIfAbsent(label, SamplingStatCalculator::new).addSample(sr);
@@ -224,5 +297,30 @@ public class JTLParser {
         public int     percentile    = 90;
         /** Set internally during parse — tracks the test start timestamp. */
         public long    minTimestamp  = 0;
+
+        /**
+         * Mirrors JMeter's Transaction Controller "Generate Parent Sample" checkbox.
+         *
+         * <p>{@code true} (default / ON) — sub-results are detected and excluded so
+         * only parent/controller-level rows appear in the table, matching standard
+         * JMeter Aggregate Report behaviour.</p>
+         *
+         * <p>{@code false} (OFF) — sub-result detection is skipped; every label that
+         * appears in the JTL is aggregated as its own row.</p>
+         */
+        public boolean generateParentSample = true;
+
+        /**
+         * Mirrors JMeter's Aggregate Report "Include duration of timer and
+         * pre-post processors in generated sample" checkbox.
+         *
+         * <p>{@code true} (default / ON) — the raw {@code elapsed} value from the JTL
+         * is used as-is, matching standard JMeter Aggregate Report behaviour.</p>
+         *
+         * <p>{@code false} (OFF) — the {@code IdleTime} column value (time spent
+         * waiting in timers and pre/post processors) is subtracted from each sample's
+         * elapsed time before aggregation, yielding net processing-only response times.</p>
+         */
+        public boolean includeTimerDuration = true;
     }
 }
