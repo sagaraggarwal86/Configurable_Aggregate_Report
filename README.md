@@ -29,7 +29,7 @@
 1. Download the latest JAR from
    the [GitHub Releases](https://github.com/sagaraggarwal86/Configurable_Aggregate_Report/releases) page or click here
    to download
-   instantly [latest JAR](https://github.com/sagaraggarwal86/Configurable_Aggregate_Report/releases/download/v2.5.0/Configurable_Aggregate_Report-2.7.0.jar)
+   instantly [latest JAR](https://github.com/sagaraggarwal86/Configurable_Aggregate_Report/releases/download/v2.7.0/Configurable_Aggregate_Report-2.7.0.jar)
 
 3. Copy it to your JMeter `lib/ext/` directory:
    ```
