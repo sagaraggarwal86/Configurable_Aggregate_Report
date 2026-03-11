@@ -14,10 +14,6 @@ import java.awt.*;
 import java.awt.event.FocusAdapter;
 import java.awt.event.FocusEvent;
 import java.io.IOException;
-import java.time.Instant;
-import java.time.LocalDateTime;
-import java.time.ZoneId;
-import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
@@ -73,8 +69,6 @@ public class AggregateReportPanel extends JPanel {
     static final String TOTAL_LABEL           = "TOTAL";
 
     private static final Logger log = LoggerFactory.getLogger(AggregateReportPanel.class);
-    private static final DateTimeFormatter DISPLAY_TIME_FORMAT =
-            DateTimeFormatter.ofPattern("MM/dd/yy HH:mm:ss");
 
     // ── Filter fields ────────────────────────────────────────────
     final JTextField startOffsetField       = new JTextField("", 10);
@@ -623,19 +617,9 @@ public class AggregateReportPanel extends JPanel {
     // ─────────────────────────────────────────────────────────────
 
     private void updateTimeInfo(JTLParser.ParseResult result) {
-        startTimeField.setText(result.startTimeMs > 0 ? formatMs(result.startTimeMs) : "");
-        endTimeField.setText(result.endTimeMs     > 0 ? formatMs(result.endTimeMs)   : "");
-        durationField.setText(result.durationMs   > 0 ? formatDuration(result.durationMs) : "");
-    }
-
-    private static String formatMs(long epochMs) {
-        return LocalDateTime.ofInstant(Instant.ofEpochMilli(epochMs), ZoneId.systemDefault())
-                .format(DISPLAY_TIME_FORMAT);
-    }
-
-    private static String formatDuration(long ms) {
-        long s = ms / 1000;
-        return String.format("%dh %dm %ds", s / 3600, (s % 3600) / 60, s % 60);
+        startTimeField.setText(result.formattedStartTime());
+        endTimeField.setText(result.formattedEndTime());
+        durationField.setText(result.formattedDuration());
     }
 
     private static int parseIntField(JTextField field, int fallback) {

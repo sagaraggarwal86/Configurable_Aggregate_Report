@@ -64,8 +64,12 @@ public final class TransactionFilter {
             } catch (PatternSyntaxException e) {
                 return false;
             }
-            // Evict the whole cache rather than evicting a single entry —
-            // simple and allocation-free; cache is rarely near the limit.
+            // Eviction strategy: clear the entire cache when the size limit is reached.
+            // This is intentionally simple — in normal GUI use, the number of distinct
+            // regex patterns entered by a user in one session is in the single digits,
+            // so the limit of MAX_CACHE_SIZE (100) is effectively never reached.
+            // A full clear is cheaper to reason about than LRU eviction and introduces
+            // no correctness risk; only a one-time recompile cost if the limit is hit.
             if (PATTERN_CACHE.size() >= MAX_CACHE_SIZE) {
                 PATTERN_CACHE.clear();
             }

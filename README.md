@@ -32,10 +32,10 @@
 1. Download the latest JAR from
    the [GitHub Releases](https://github.com/sagaraggarwal86/Configurable_Aggregate_Report/releases) page or click here
    to download
-   instantly [latest JAR](https://github.com/sagaraggarwal86/Configurable_Aggregate_Report/releases/download/v2.7.0/Configurable_Aggregate_Report-2.7.0.jar)
+   instantly [latest JAR](https://github.com/sagaraggarwal86/Configurable_Aggregate_Report/releases/download/v2.7.0/Configurable_Aggregate_Report-3.1.0.jar)
 2. Copy it to your JMeter `lib/ext/` directory:
    ```
-   <JMETER_HOME>/lib/ext/Configurable_Aggregate_Report-2.7.0.jar
+   <JMETER_HOME>/lib/ext/Configurable_Aggregate_Report-3.1.0.jar
    ```
 3. Restart JMeter
 4. *(Optional — CLI mode)* Copy the wrapper scripts to `<JMETER_HOME>/bin/`:
@@ -53,7 +53,7 @@
 git clone https://github.com/sagaraggarwal86/Configurable_Aggregate_Report.git
 cd Configurable_Aggregate_Report
 mvn clean verify
-cp target/Configurable_Aggregate_Report-2.7.0.jar $JMETER_HOME/lib/ext/
+cp target/Configurable_Aggregate_Report-3.1.0.jar $JMETER_HOME/lib/ext/
 ```
 
 > **Publishing to Maven Central** requires the `release` profile (sources JAR, Javadoc JAR, GPG signing):
@@ -93,7 +93,7 @@ cp target/Configurable_Aggregate_Report-2.7.0.jar $JMETER_HOME/lib/ext/
 └────────────────────────────────────────────────────────────────────────┘
 ```
 
-<img src="img.jpg" alt="Plugin screenshot" width="500">
+<img src="docs/img.jpg" alt="Plugin screenshot" width="500">
 
 ---
 
@@ -268,7 +268,7 @@ Copy the wrapper scripts to your JMeter `bin/` directory:
 ```
 <JMETER_HOME>/bin/car-cli-report.bat    ← Windows
 <JMETER_HOME>/bin/car-cli-report.sh     ← macOS / Linux
-<JMETER_HOME>/lib/ext/Configurable_Aggregate_Report-2.7.0.jar  ← already installed
+<JMETER_HOME>/lib/ext/Configurable_Aggregate_Report-3.1.0.jar  ← already installed
 ```
 
 The scripts auto-detect the JMeter installation from their own location — no environment variables needed.
@@ -277,12 +277,12 @@ The scripts auto-detect the JMeter installation from their own location — no e
 
 **Windows:**
 ```cmd
-car-cli-report.bat -i results.jtl --ai --provider groq --config ai-reporter.properties
+car-cli-report.bat -i results.jtl --provider groq --config ai-reporter.properties
 ```
 
 **macOS / Linux:**
 ```bash
-./car-cli-report.sh -i results.jtl --ai --provider groq --config ai-reporter.properties
+./car-cli-report.sh -i results.jtl --provider groq --config ai-reporter.properties
 ```
 
 ### All Options
@@ -290,7 +290,6 @@ car-cli-report.bat -i results.jtl --ai --provider groq --config ai-reporter.prop
 ```
 Required:
   -i, --input FILE            JTL file path
-  --ai                        enable AI analysis
   --provider STRING           provider name, case-insensitive
                               (groq, openai, claude, gemini, mistral, deepseek)
   --config FILE               path to ai-reporter.properties
@@ -317,7 +316,7 @@ SLA Thresholds:
   --rt-metric avg|percentile  which RT column for --rt-sla (default: percentile)
 
 Help:
-  -h, --help                  print usage and exit
+  -h, --help                  print this message and exit
 ```
 
 ### Exit Codes
@@ -335,7 +334,7 @@ Help:
 ```bash
 ./car-cli-report.sh \
   -i results.jtl -o report.html \
-  --ai --provider openai --config /etc/jmeter/ai-reporter.properties \
+  --provider openai --config /etc/jmeter/ai-reporter.properties \
   --start-offset 10 --end-offset 300 --percentile 95 \
   --scenario-name "Nightly Load Test" --virtual-users 200 \
   --error-sla 5 --rt-sla 2000 --rt-metric percentile

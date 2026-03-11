@@ -10,6 +10,10 @@ import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
+import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import java.util.*;
 
 /**
@@ -69,7 +73,7 @@ public class JTLParser {
         try (BufferedReader reader = new BufferedReader(
                 new InputStreamReader(new FileInputStream(filePath), StandardCharsets.UTF_8))) {
             String headerLine = reader.readLine();
-            if (headerLine == null) throw new IOException("JTL file is empty: " + filePath);
+            if (headerLine == null) throw new JtlParseException("JTL file is empty: " + filePath);
 
             Map<String, Integer> colMap     = JtlParserCore.buildColumnMap(headerLine.split(","));
             Integer tsIdx       = colMap.get("timeStamp");
@@ -168,7 +172,7 @@ public class JTLParser {
         try (BufferedReader reader = new BufferedReader(
                 new InputStreamReader(new FileInputStream(filePath), StandardCharsets.UTF_8))) {
             String headerLine = reader.readLine();
-            if (headerLine == null) throw new IOException("JTL file is empty: " + filePath);
+            if (headerLine == null) throw new JtlParseException("JTL file is empty: " + filePath);
 
             Map<String, Integer> colMap = JtlParserCore.buildColumnMap(headerLine.split(","));
             String line;
@@ -289,6 +293,51 @@ public class JTLParser {
         private static final int MAX_ERROR_TYPES = 5;
 
         /**
+         * Shared display format — matches the format used in the GUI table and CLI output.
+         * Single source of truth: avoids the duplicated {@code DateTimeFormatter} constants
+         * that previously lived in {@code AggregateReportPanel} and {@code CliReportPipeline}.
+         */
+        private static final DateTimeFormatter DISPLAY_TIME_FORMAT =
+                DateTimeFormatter.ofPattern("MM/dd/yy HH:mm:ss");
+
+        /**
+         * Returns the test start time as a formatted display string, or an empty string
+         * if {@link #startTimeMs} is zero.
+         *
+         * @return formatted start time, e.g. {@code "03/11/26 14:30:00"}, or {@code ""}
+         */
+        public String formattedStartTime() {
+            return startTimeMs > 0 ? formatEpochMs(startTimeMs) : "";
+        }
+
+        /**
+         * Returns the test end time as a formatted display string, or an empty string
+         * if {@link #endTimeMs} is zero.
+         *
+         * @return formatted end time, e.g. {@code "03/11/26 15:00:00"}, or {@code ""}
+         */
+        public String formattedEndTime() {
+            return endTimeMs > 0 ? formatEpochMs(endTimeMs) : "";
+        }
+
+        /**
+         * Returns the test duration as a formatted display string, or an empty string
+         * if {@link #durationMs} is zero.
+         *
+         * @return formatted duration, e.g. {@code "0h 30m 0s"}, or {@code ""}
+         */
+        public String formattedDuration() {
+            if (durationMs <= 0) return "";
+            long s = durationMs / 1000;
+            return String.format("%dh %dm %ds", s / 3600, (s % 3600) / 60, s % 60);
+        }
+
+        private static String formatEpochMs(long epochMs) {
+            return LocalDateTime.ofInstant(Instant.ofEpochMilli(epochMs), ZoneId.systemDefault())
+                    .format(DISPLAY_TIME_FORMAT);
+        }
+
+        /**
          * Constructs a parse result.
          *
          * @param results        per-label aggregated statistics
@@ -332,7 +381,7 @@ public class JTLParser {
                         m.put("count",           e.getValue());
                         return m;
                     })
-                    .collect(java.util.stream.Collectors.toList());
+                    .toList();
         }
     }
 

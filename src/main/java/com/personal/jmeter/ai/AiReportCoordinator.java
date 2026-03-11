@@ -6,9 +6,13 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import javax.swing.*;
+import javax.swing.filechooser.FileNameExtensionFilter;
 import java.awt.*;
 import java.io.File;
 import java.io.IOException;
+import java.nio.file.Path;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -57,9 +61,13 @@ public class AiReportCoordinator {
     }
 
     private static void openInBrowser(String htmlPath) {
+        if (!Desktop.isDesktopSupported()) {
+            log.info("openInBrowser: Desktop API not supported on this platform — skipping.");
+            return;
+        }
         try {
             Desktop.getDesktop().browse(new File(htmlPath).toURI());
-        } catch (IOException ex) {
+        } catch (IOException | UnsupportedOperationException ex) {
             log.warn("openInBrowser: could not open default browser. reason={}", ex.getMessage());
         }
     }
@@ -136,7 +144,79 @@ public class AiReportCoordinator {
     }
 
     private String renderReport(ReportContext ctx, String markdown) throws IOException {
-        return renderer.render(markdown, ctx.jtlPath, ctx.config, ctx.tableRows, ctx.timeBuckets);
+        String suggestedName = deriveSuggestedFileName(ctx.config.scenarioName);
+        File startDir = Path.of(ctx.jtlPath).toAbsolutePath().getParent() != null
+                ? Path.of(ctx.jtlPath).toAbsolutePath().getParent().toFile()
+                : new File(System.getProperty("user.dir"));
+
+        String outPath = promptForSavePath(suggestedName, startDir);
+        if (outPath == null) {
+            throw new IOException("Report save cancelled by user.");
+        }
+
+        return renderer.renderToFile(markdown, outPath, ctx.config, ctx.tableRows, ctx.timeBuckets);
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // Save dialog and path helpers
+    // ─────────────────────────────────────────────────────────────
+
+    /**
+     * Shows a save-file dialog on the EDT so the user chooses where to save the report.
+     * Blocks the calling background thread until the user responds.
+     *
+     * @param suggestedName suggested filename (no directory component)
+     * @param startDir      initial directory for the dialog
+     * @return user-chosen absolute path, or {@code null} if the user cancelled
+     * @throws IOException if the EDT invocation is interrupted
+     */
+    private static String promptForSavePath(String suggestedName, File startDir)
+            throws IOException {
+        final String[] result = {null};
+        try {
+            SwingUtilities.invokeAndWait(() -> {
+                JFileChooser fc = new JFileChooser(startDir);
+                fc.setDialogTitle("Save AI Performance Report");
+                fc.setSelectedFile(new File(suggestedName));
+                fc.setFileFilter(new FileNameExtensionFilter("HTML Files (*.html)", "html"));
+                if (fc.showSaveDialog(null) == JFileChooser.APPROVE_OPTION) {
+                    File chosen = fc.getSelectedFile();
+                    if (!chosen.getName().toLowerCase().endsWith(".html")) {
+                        chosen = new File(chosen.getAbsolutePath() + ".html");
+                    }
+                    result[0] = chosen.getAbsolutePath();
+                }
+            });
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IOException("Save dialog interrupted", e);
+        } catch (java.lang.reflect.InvocationTargetException e) {
+            throw new IOException("Save dialog failed: " + e.getCause().getMessage(), e);
+        }
+        return result[0];
+    }
+
+    /**
+     * Builds a suggested filename for the AI report (no directory component).
+     *
+     * @param scenarioName test plan name (may be null/blank)
+     * @return suggested filename, e.g. {@code AI_Generated_Report_Checkout_20260311_143022.html}
+     */
+    private static String deriveSuggestedFileName(String scenarioName) {
+        String timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"));
+        String planPart  = sanitizeSegment(scenarioName);
+        StringBuilder name = new StringBuilder("AI_Generated_Report");
+        if (!planPart.isEmpty()) name.append('_').append(planPart);
+        name.append('_').append(timestamp).append(".html");
+        return name.toString();
+    }
+
+    private static String sanitizeSegment(String raw) {
+        if (raw == null || raw.isBlank()) return "";
+        return raw.trim()
+                .replaceAll("[\\\\/:*?\"<>|\\s]+", "_")
+                .replaceAll("_+", "_")
+                .replaceAll("^_|_$", "");
     }
 
     private void onSuccess(String htmlPath, JDialog progressDialog, JButton triggerBtn) {

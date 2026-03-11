@@ -41,7 +41,6 @@ final class CliArgs {
 
     // ── State ─────────────────────────────────────────────────────
     private boolean helpRequested = false;
-    private boolean aiFlag        = false;
     private final List<String> errors = new ArrayList<>();
 
     private CliArgs() {}
@@ -101,7 +100,6 @@ final class CliArgs {
             switch (arg) {
                 case "-i", "--input"          -> inputFile     = nextValue(args, i++, arg);
                 case "-o", "--output"         -> outputFile    = nextValue(args, i++, arg);
-                case "--ai"                   -> aiFlag        = true;
                 case "--provider"             -> provider      = nextValue(args, i++, arg);
                 case "--config"               -> configFile    = nextValue(args, i++, arg);
                 case "--start-offset"         -> startOffset   = nextInt(args, i++, arg);
@@ -164,8 +162,6 @@ final class CliArgs {
         else if (!new File(inputFile).isFile())
             errors.add("JTL file not found: " + inputFile);
 
-        if (!aiFlag)
-            errors.add("--ai is required");
         if (provider == null || provider.isBlank())
             errors.add("--provider is required");
         if (configFile == null || configFile.isBlank())
@@ -217,7 +213,6 @@ final class CliArgs {
 
                 Required:
                   -i, --input FILE            JTL file path
-                  --ai                        enable AI analysis
                   --provider STRING           provider name, case-insensitive
                                               (groq, openai, claude, gemini, mistral, deepseek)
                   --config FILE               path to ai-reporter.properties
@@ -248,12 +243,12 @@ final class CliArgs {
 
                 Examples:
                   # Minimal
-                  car-cli-report.sh -i results.jtl --ai --provider groq --config ai-reporter.properties
+                  car-cli-report.sh -i results.jtl --provider groq --config ai-reporter.properties
 
                   # Full
                   car-cli-report.sh \\
                     -i results.jtl -o report.html \\
-                    --ai --provider openai --config /path/to/ai-reporter.properties \\
+                    --provider openai --config /path/to/ai-reporter.properties \\
                     --start-offset 10 --end-offset 300 --percentile 95 \\
                     --chart-interval 60 --search "Login" \\
                     --scenario-name "Load Test" --description "Peak hour" --virtual-users 200 \\

@@ -2,17 +2,13 @@ package com.personal.jmeter.cli;
 
 import com.personal.jmeter.ai.*;
 import com.personal.jmeter.listener.TransactionFilter;
+import com.personal.jmeter.listener.TablePopulator;
 import com.personal.jmeter.parser.JTLParser;
 import org.apache.jmeter.visualizers.SamplingStatCalculator;
 
 import java.io.IOException;
 import java.io.PrintStream;
 import java.nio.file.Path;
-import java.text.DecimalFormat;
-import java.time.Instant;
-import java.time.LocalDateTime;
-import java.time.ZoneId;
-import java.time.format.DateTimeFormatter;
 import java.util.*;
 
 /**
@@ -25,11 +21,6 @@ import java.util.*;
 final class CliReportPipeline {
 
     private static final String TOTAL_LABEL = "TOTAL";
-    private static final DateTimeFormatter DISPLAY_TIME =
-            DateTimeFormatter.ofPattern("MM/dd/yy HH:mm:ss");
-    private static final DecimalFormat FMT_INT    = new DecimalFormat("#");
-    private static final DecimalFormat FMT_ONE_DP = new DecimalFormat("0.0");
-    private static final DecimalFormat FMT_TWO_DP = new DecimalFormat("0.00");
 
     private final CliArgs args;
     private final PrintStream progress;
@@ -64,6 +55,13 @@ final class CliReportPipeline {
         List<String[]> tableRows = buildTableRows(result, opts.percentile);
         progress("Built %d table rows.", tableRows.size());
 
+        // Step 3 — Resolve shared time/user context (used by both prompt and render config)
+        TimeContext timeCtx = new TimeContext(
+                result.formattedStartTime(),
+                result.formattedEndTime(),
+                result.formattedDuration(),
+                args.virtualUsers() > 0 ? String.valueOf(args.virtualUsers()) : "");
+
         // Step 3 — Resolve AI provider
         progress("Loading provider configuration from: " + args.configFile());
         AiProviderConfig provider = resolveProvider();
@@ -73,7 +71,7 @@ final class CliReportPipeline {
         progress("Validating API key and pinging %s...", provider.displayName);
         String pingError = AiProviderRegistry.validateAndPing(provider);
         if (pingError != null) {
-            throw new IOException("Provider validation failed for " + provider.displayName
+            throw new AiProviderException("Provider validation failed for " + provider.displayName
                     + ":\n" + pingError);
         }
         progress("Ping successful.");
@@ -84,7 +82,7 @@ final class CliReportPipeline {
         if (systemPrompt == null) {
             throw new IOException("Bundled prompt resource not found. Plugin JAR may be corrupt.");
         }
-        PromptContent prompt = buildPromptContent(result, systemPrompt);
+        PromptContent prompt = buildPromptContent(result, systemPrompt, timeCtx);
 
         // Step 6 — Call AI
         progress("Calling %s (this may take 30-60 seconds)...", provider.displayName);
@@ -94,7 +92,7 @@ final class CliReportPipeline {
 
         // Step 7 — Render HTML
         progress("Rendering HTML report...");
-        HtmlReportRenderer.RenderConfig config = buildRenderConfig(result);
+        HtmlReportRenderer.RenderConfig config = buildRenderConfig(result, timeCtx);
         String outputPath = new HtmlReportRenderer().renderToFile(
                 markdown, args.outputFile(), config, tableRows, result.timeBuckets);
         progress("Report saved to: " + outputPath);
@@ -116,7 +114,7 @@ final class CliReportPipeline {
     }
 
     // ─────────────────────────────────────────────────────────────
-    // Table row building (mirrors TablePopulator.buildRow)
+    // Table row building (delegates to TablePopulator — single source of truth)
     // ─────────────────────────────────────────────────────────────
 
     private List<String[]> buildTableRows(JTLParser.ParseResult result, int percentile) {
@@ -134,27 +132,9 @@ final class CliReportPipeline {
                 continue;
             }
 
-            rows.add(buildRow(calc, pFraction));
+            rows.add(TablePopulator.buildRowAsStrings(calc, pFraction));
         }
         return rows;
-    }
-
-    private String[] buildRow(SamplingStatCalculator calc, double pFraction) {
-        long total  = calc.getCount();
-        long failed = Math.round(calc.getErrorPercentage() * total);
-        return new String[]{
-                calc.getLabel(),
-                String.valueOf(total),
-                String.valueOf(total - failed),
-                String.valueOf(failed),
-                FMT_INT.format(calc.getMean()),
-                String.valueOf(calc.getMin().intValue()),
-                String.valueOf(calc.getMax().intValue()),
-                FMT_INT.format(calc.getPercentPoint(pFraction).doubleValue()),
-                FMT_ONE_DP.format(calc.getStandardDeviation()),
-                FMT_TWO_DP.format(calc.getErrorPercentage() * 100.0) + "%",
-                String.format("%.1f/sec", calc.getRate())
-        };
     }
 
     // ─────────────────────────────────────────────────────────────
@@ -168,7 +148,7 @@ final class CliReportPipeline {
         return providers.stream()
                 .filter(p -> p.providerKey.equalsIgnoreCase(args.provider()))
                 .findFirst()
-                .orElseThrow(() -> new IOException(
+                .orElseThrow(() -> new AiProviderException(
                         "Provider '" + args.provider() + "' not found in " + args.configFile()
                                 + ".\nConfigured providers: "
                                 + (providers.isEmpty() ? "(none)"
@@ -180,12 +160,9 @@ final class CliReportPipeline {
     // Prompt content
     // ─────────────────────────────────────────────────────────────
 
-    private PromptContent buildPromptContent(JTLParser.ParseResult result, String systemPrompt) {
-        String startTime  = result.startTimeMs > 0 ? formatMs(result.startTimeMs) : "";
-        String endTime    = result.endTimeMs   > 0 ? formatMs(result.endTimeMs)   : "";
-        String duration   = result.durationMs  > 0 ? formatDuration(result.durationMs) : "";
-        String users      = args.virtualUsers() > 0 ? String.valueOf(args.virtualUsers()) : "";
-
+    private PromptContent buildPromptContent(JTLParser.ParseResult result,
+                                             String systemPrompt,
+                                             TimeContext timeCtx) {
         String slaErrorPct = args.hasErrorSla()
                 ? args.errorSla() + "%" : "Not configured";
         String slaRtMs = args.hasRtSla()
@@ -194,12 +171,12 @@ final class CliReportPipeline {
                 ? "P" + args.percentile() + " (ms)" : "Avg (ms)";
 
         PromptRequest request = new PromptRequest(
-                users,
+                timeCtx.users(),
                 args.scenarioName(),
                 args.description(),
-                startTime,
-                endTime,
-                duration,
+                timeCtx.startTime(),
+                timeCtx.endTime(),
+                timeCtx.duration(),
                 "",  // threadGroupName — not available from CLI
                 args.percentile(),
                 slaErrorPct,
@@ -218,20 +195,16 @@ final class CliReportPipeline {
     // Render config
     // ─────────────────────────────────────────────────────────────
 
-    private HtmlReportRenderer.RenderConfig buildRenderConfig(JTLParser.ParseResult result) {
-        String startTime = result.startTimeMs > 0 ? formatMs(result.startTimeMs) : "";
-        String endTime   = result.endTimeMs   > 0 ? formatMs(result.endTimeMs)   : "";
-        String duration  = result.durationMs  > 0 ? formatDuration(result.durationMs) : "";
-        String users     = args.virtualUsers() > 0 ? String.valueOf(args.virtualUsers()) : "";
-
+    private HtmlReportRenderer.RenderConfig buildRenderConfig(JTLParser.ParseResult result,
+                                                              TimeContext timeCtx) {
         return new HtmlReportRenderer.RenderConfig(
-                users,
+                timeCtx.users(),
                 args.scenarioName(),
                 args.description(),
                 "",  // threadGroupName
-                startTime,
-                endTime,
-                duration,
+                timeCtx.startTime(),
+                timeCtx.endTime(),
+                timeCtx.duration(),
                 args.percentile());
     }
 
@@ -239,17 +212,20 @@ final class CliReportPipeline {
     // Formatting helpers
     // ─────────────────────────────────────────────────────────────
 
-    private static String formatMs(long epochMs) {
-        return LocalDateTime.ofInstant(Instant.ofEpochMilli(epochMs), ZoneId.systemDefault())
-                .format(DISPLAY_TIME);
-    }
-
-    private static String formatDuration(long ms) {
-        long s = ms / 1000;
-        return String.format("%dh %dm %ds", s / 3600, (s % 3600) / 60, s % 60);
-    }
-
     private void progress(String format, Object... params) {
         progress.println("[CLI] " + String.format(format, params));
     }
+
+    // ─────────────────────────────────────────────────────────────
+    // Value types
+    // ─────────────────────────────────────────────────────────────
+
+    /**
+     * Immutable snapshot of formatted time and user-count values shared between
+     * {@link #buildPromptContent} and {@link #buildRenderConfig}.
+     * Computed once in {@link #execute()} to avoid duplicating the same four
+     * derivations across two methods.
+     */
+    private record TimeContext(String startTime, String endTime,
+                               String duration,  String users) {}
 }

@@ -224,6 +224,12 @@ class HtmlTransactionTableTest {
         }
 
         @Test
+        @DisplayName("double-quote escaped to &quot;")
+        void doubleQuoteEscaped() {
+            assertEquals("&quot;value&quot;", HtmlReportRenderer.escapeHtml("\"value\""));
+        }
+
+        @Test
         @DisplayName("all special chars escaped together")
         void allSpecialCharsEscaped() {
             assertEquals("&lt;a&gt; &amp; &lt;b&gt;",

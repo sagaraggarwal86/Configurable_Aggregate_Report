@@ -5,6 +5,10 @@ import org.apache.jmeter.util.JMeterUtils;
 import java.io.IOException;
 import java.net.URL;
 
+import com.personal.jmeter.ai.AiProviderException;
+import com.personal.jmeter.ai.AiServiceException;
+import com.personal.jmeter.parser.JtlParseException;
+
 /**
  * Command-line entry point for the Configurable Aggregate Report plugin.
  *
@@ -71,22 +75,15 @@ public final class Main {
             String outputPath = new CliReportPipeline(cli).execute();
             System.out.println(outputPath);
             System.exit(EXIT_OK);
+        } catch (JtlParseException e) {
+            System.err.println("Error: " + e.getMessage());
+            System.exit(EXIT_PARSE_ERROR);
+        } catch (AiProviderException | AiServiceException e) {
+            System.err.println("Error: " + e.getMessage());
+            System.exit(EXIT_AI_ERROR);
         } catch (IOException e) {
-            String msg = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
-
-            int exitCode;
-            if (msg.contains("JTL file is empty") || msg.contains("parse")) {
-                exitCode = EXIT_PARSE_ERROR;
-            } else if (msg.contains("Provider") || msg.contains("API")
-                    || msg.contains("ping") || msg.contains("connect")
-                    || msg.contains("HTTP")) {
-                exitCode = EXIT_AI_ERROR;
-            } else {
-                exitCode = EXIT_WRITE_ERROR;
-            }
-
-            System.err.println("Error: " + msg);
-            System.exit(exitCode);
+            System.err.println("Error: " + e.getMessage());
+            System.exit(EXIT_WRITE_ERROR);
         }
     }
 

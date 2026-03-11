@@ -6,7 +6,7 @@
     <modelVersion>4.0.0</modelVersion>
     <groupId>io.github.sagaraggarwal86</groupId>
     <artifactId>Configurable_Aggregate_Report</artifactId>
-    <version>2.7.0</version>
+    <version>3.1.0</version>
     <packaging>jar</packaging>
     <name>Configurable Aggregate Report Plugin</name>
     <description>A listener plugin to prepare report for configurable parameters for Apache JMeter</description>
@@ -41,8 +41,6 @@
         <maven.compiler.source>17</maven.compiler.source>
         <maven.compiler.target>17</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-        <!-- Override in settings.xml or with -Dgpg.executable=gpg for CI/CD -->
-        <gpg.executable>C:\Program Files\GnuPG\bin\gpg.exe</gpg.executable>
     </properties>
 
     <dependencyManagement>
@@ -389,7 +387,6 @@
                                 <arg>--pinentry-mode</arg>
                                 <arg>loopback</arg>
                             </gpgArguments>
-                            <executable>${gpg.executable}</executable>
                         </configuration>
                     </plugin>
                 </plugins>

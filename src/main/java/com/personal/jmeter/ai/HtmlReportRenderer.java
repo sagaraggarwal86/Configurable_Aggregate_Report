@@ -10,8 +10,6 @@ import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
-import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Objects;
 
@@ -64,49 +62,6 @@ public class HtmlReportRenderer {
     // ─────────────────────────────────────────────────────────────
 
     /**
-     * Renders the full AI report to an HTML file on disk.
-     *
-     * <p>Uses an atomic write pattern: disk-space check → write to sibling {@code .tmp} →
-     * atomic rename → guaranteed {@code .tmp} cleanup in {@code finally}.
-     * This ensures no partial file is left on disk if the write or rename fails.</p>
-     *
-     * @param markdownContent AI-generated report in Markdown; must not be null
-     * @param jtlFilePath     path to the source JTL file (output placed next to it); must not be null
-     * @param config          scenario metadata; must not be null
-     * @param tableRows       visible table rows from the plugin (TOTAL excluded)
-     * @param timeBuckets     30-second time buckets from the JTL parser
-     * @return absolute path of the written HTML file
-     * @throws IOException if the file cannot be written
-     */
-    public String render(String markdownContent,
-                         String jtlFilePath,
-                         RenderConfig config,
-                         List<String[]> tableRows,
-                         List<JTLParser.TimeBucket> timeBuckets) throws IOException {
-        Objects.requireNonNull(markdownContent, "markdownContent must not be null");
-        Objects.requireNonNull(jtlFilePath,     "jtlFilePath must not be null");
-        Objects.requireNonNull(config,          "config must not be null");
-
-        log.info("render: generating HTML report. jtlFile={}", jtlFilePath);
-
-        String page = buildFullPage(markdownContent, config, tableRows, timeBuckets);
-
-        String suggestedName = deriveSuggestedFileName(config.scenarioName);
-        java.io.File startDir = Path.of(jtlFilePath).toAbsolutePath().getParent() != null
-                ? Path.of(jtlFilePath).toAbsolutePath().getParent().toFile()
-                : new java.io.File(System.getProperty("user.dir"));
-
-        String outPath = promptForOutputPath(suggestedName, startDir);
-        if (outPath == null) {
-            throw new IOException("Report save cancelled by user.");
-        }
-
-        writeReport(page, Path.of(outPath));
-        log.info("render: HTML report written. outPath={}", outPath);
-        return outPath;
-    }
-
-    /**
      * Renders the full AI report to an HTML file at the specified output path.
      * No Swing dialog is shown — suitable for headless / CLI invocation.
      *
@@ -136,7 +91,7 @@ public class HtmlReportRenderer {
     }
 
     // ─────────────────────────────────────────────────────────────
-    // Page assembly (shared by render and renderToFile)
+    // Page assembly
     // ─────────────────────────────────────────────────────────────
 
     private String buildFullPage(String markdownContent, RenderConfig config,
@@ -212,48 +167,14 @@ public class HtmlReportRenderer {
      */
     static String escapeHtml(String s) {
         if (s == null) return "";
-        return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
+        return s.replace("&", "&amp;")
+                .replace("<", "&lt;")
+                .replace(">", "&gt;")
+                .replace("\"", "&quot;");
     }
 
     // ─────────────────────────────────────────────────────────────
-    // Save dialog
-    // ─────────────────────────────────────────────────────────────
-
-    /**
-     * Shows a save dialog on the EDT so the user chooses where to save the report.
-     * Called from the background AI-report thread; blocks until the user responds.
-     *
-     * @param suggestedName the suggested filename (no directory)
-     * @param startDir      the initial directory to open the dialog in
-     * @return the user-chosen absolute path, or {@code null} if the user cancelled
-     * @throws IOException if the EDT invocation is interrupted
-     */
-    private String promptForOutputPath(String suggestedName, java.io.File startDir) throws IOException {
-        final String[] result = {null};
-        try {
-            javax.swing.SwingUtilities.invokeAndWait(() -> {
-                javax.swing.JFileChooser fc = new javax.swing.JFileChooser(startDir);
-                fc.setDialogTitle("Save AI Performance Report");
-                fc.setSelectedFile(new java.io.File(suggestedName));
-                fc.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter(
-                        "HTML Files (*.html)", "html"));
-                if (fc.showSaveDialog(null) == javax.swing.JFileChooser.APPROVE_OPTION) {
-                    java.io.File chosen = fc.getSelectedFile();
-                    if (!chosen.getName().toLowerCase().endsWith(".html")) {
-                        chosen = new java.io.File(chosen.getAbsolutePath() + ".html");
-                    }
-                    result[0] = chosen.getAbsolutePath();
-                }
-            });
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new IOException("Save dialog interrupted", e);
-        } catch (java.lang.reflect.InvocationTargetException e) {
-            throw new IOException("Save dialog failed: " + e.getCause().getMessage(), e);
-        }
-        return result[0];
-    }
-
+    // Path helpers
     // ─────────────────────────────────────────────────────────────
 
     /**
@@ -306,32 +227,6 @@ public class HtmlReportRenderer {
     // ─────────────────────────────────────────────────────────────
     // Path helpers
     // ─────────────────────────────────────────────────────────────
-
-    /**
-     * Builds a suggested filename for the AI report (no directory component).
-     * The user chooses the actual save location via the save dialog.
-     *
-     * @param scenarioName scenario/test plan name (may be null/blank)
-     * @return suggested filename, e.g. {@code AI_Generated_Report_Checkout_20260311_143022.html}
-     */
-    private static String deriveSuggestedFileName(String scenarioName) {
-        String timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"));
-        String planPart = sanitizeSegment(scenarioName);
-
-        StringBuilder name = new StringBuilder("AI_Generated_Report");
-        if (!planPart.isEmpty()) name.append('_').append(planPart);
-        name.append('_').append(timestamp).append(".html");
-
-        return name.toString();
-    }
-
-    private static String sanitizeSegment(String raw) {
-        if (raw == null || raw.isBlank()) return "";
-        return raw.trim()
-                .replaceAll("[\\\\/:*?\"<>|\\s]+", "_")
-                .replaceAll("_+", "_")
-                .replaceAll("^_|_$", "");
-    }
 
     private static String[] buildTableHeaders(int percentile) {
         String[] headers = TABLE_HEADERS.clone();

@@ -17,7 +17,7 @@ import java.util.*;
  * design limit (Standard 3 SRP). Responsibility: data rendering only — no I/O,
  * no network, no file access.</p>
  */
-final class TablePopulator {
+public final class TablePopulator {
 
     private static final String TOTAL_LABEL = "TOTAL";
 
@@ -94,16 +94,38 @@ final class TablePopulator {
     }
 
     private Object[] buildRow(SamplingStatCalculator calc, double pFraction) {
+        String[] s = buildRowAsStrings(calc, pFraction);
+        return new Object[]{
+                s[0],
+                Long.parseLong(s[1]),   // Count  — kept numeric for table sorting
+                Long.parseLong(s[2]),   // Passed
+                Long.parseLong(s[3]),   // Failed
+                s[4], s[5], s[6], s[7], s[8], s[9], s[10]
+        };
+    }
+
+    /**
+     * Builds a single data row as formatted strings.
+     *
+     * <p>Single source of truth for row formatting — used by both
+     * {@link #buildRow} (GUI table) and
+     * {@link com.personal.jmeter.cli.CliReportPipeline} (CLI HTML report).</p>
+     *
+     * @param calc      aggregated statistics for one label
+     * @param pFraction percentile as a fraction (e.g. 0.90 for P90)
+     * @return 11-element string array matching {@link AggregateReportPanel#ALL_COLUMNS}
+     */
+    public static String[] buildRowAsStrings(SamplingStatCalculator calc, double pFraction) {
         long total  = calc.getCount();
         long failed = Math.round(calc.getErrorPercentage() * total);
-        return new Object[]{
+        return new String[]{
                 calc.getLabel(),
-                total,
-                total - failed,
-                failed,
+                String.valueOf(total),
+                String.valueOf(total - failed),
+                String.valueOf(failed),
                 FORMAT_INTEGER.format(calc.getMean()),
-                calc.getMin().intValue(),
-                calc.getMax().intValue(),
+                String.valueOf(calc.getMin().intValue()),
+                String.valueOf(calc.getMax().intValue()),
                 FORMAT_INTEGER.format(calc.getPercentPoint(pFraction).doubleValue()),
                 FORMAT_ONE_DP.format(calc.getStandardDeviation()),
                 FORMAT_TWO_DP.format(calc.getErrorPercentage() * 100.0) + "%",
