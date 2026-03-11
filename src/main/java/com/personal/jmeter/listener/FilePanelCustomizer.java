@@ -92,31 +92,6 @@ final class FilePanelCustomizer {
         }
     }
 
-    /**
-     * Walks the component tree to find the filename {@link JTextField} inside
-     * {@code AbstractVisualizer}'s {@code FilePanel} and attaches a listener
-     * that triggers auto-load when the path changes.
-     *
-     * @param container        root container to search recursively
-     * @param excludeFields    fields to skip (e.g. reportPanel fields already instrumented)
-     * @param onChangeFn       action to run on filename change
-     */
-    static void hookFilenameField(Container container,
-                                  java.util.Set<JTextField> excludeFields,
-                                  Runnable onChangeFn) {
-        for (Component comp : container.getComponents()) {
-            if (comp instanceof JTextField tf
-                    && tf.isEditable()
-                    && !excludeFields.contains(tf)) {
-                tf.getDocument().addDocumentListener(
-                        (SimpleDocListener) () -> SwingUtilities.invokeLater(onChangeFn));
-            }
-            if (comp instanceof Container c) {
-                hookFilenameField(c, excludeFields, onChangeFn);
-            }
-        }
-    }
-
     // ─────────────────────────────────────────────────────────────
     // Private helpers
     // ─────────────────────────────────────────────────────────────

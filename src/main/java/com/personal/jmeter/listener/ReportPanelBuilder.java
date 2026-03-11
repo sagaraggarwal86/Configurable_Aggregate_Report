@@ -45,8 +45,6 @@ final class ReportPanelBuilder {
     private final JCheckBoxMenuItem[] columnMenuItems;
     private final TableColumn[]       allTableColumns;
     private final TablePopulator      tablePopulator;
-    @SuppressWarnings("unused")
-    private final int                 headerClickColumn; // unused; header click resolved via mouse point
 
     // ─────────────────────────────────────────────────────────────
     // Header-click callback
@@ -104,7 +102,6 @@ final class ReportPanelBuilder {
         this.allTableColumns        = allTableColumns;
         this.tablePopulator         = tablePopulator;
         this.headerClickHandler     = headerClickHandler;
-        this.headerClickColumn      = -1;
     }
 
     // ─────────────────────────────────────────────────────────────
