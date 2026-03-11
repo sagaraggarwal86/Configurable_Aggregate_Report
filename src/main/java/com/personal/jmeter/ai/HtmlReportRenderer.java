@@ -95,6 +95,20 @@ public class HtmlReportRenderer {
         String page         = HtmlPageBuilder.buildPage(htmlBody, metricsTable, chartsBlock, config);
 
         String outPath = deriveOutputPath(jtlFilePath, config.scenarioName, config.threadGroupName);
+
+        // Check if the derived output directory is writable; fall back to save dialog if not
+        Path outDir = Path.of(outPath).toAbsolutePath().getParent();
+        if (outDir != null && (!java.nio.file.Files.isWritable(outDir)
+                || !java.nio.file.Files.isDirectory(outDir))) {
+            log.warn("render: output directory not writable: {}. Prompting user.", outDir);
+            String chosenPath = promptForOutputPath(outPath);
+            if (chosenPath == null) {
+                throw new IOException("Report save cancelled by user. "
+                        + "The original location was not writable: " + outDir);
+            }
+            outPath = chosenPath;
+        }
+
         writeReport(page, Path.of(outPath));
         log.info("render: HTML report written. outPath={}", outPath);
         return outPath;
@@ -168,7 +182,45 @@ public class HtmlReportRenderer {
     }
 
     // ─────────────────────────────────────────────────────────────
-    // File I/O
+    // Save dialog fallback
+    // ─────────────────────────────────────────────────────────────
+
+    /**
+     * Shows a save dialog on the EDT when the default output directory is not writable.
+     * Called from the background AI-report thread; blocks until the user responds.
+     *
+     * @param suggestedPath the originally derived path (used as default filename)
+     * @return the user-chosen absolute path, or {@code null} if the user cancelled
+     * @throws IOException if the EDT invocation is interrupted
+     */
+    private String promptForOutputPath(String suggestedPath) throws IOException {
+        final String[] result = {null};
+        try {
+            javax.swing.SwingUtilities.invokeAndWait(() -> {
+                javax.swing.JFileChooser fc = new javax.swing.JFileChooser();
+                fc.setDialogTitle("Save AI Report — original location not writable");
+                fc.setSelectedFile(new java.io.File(suggestedPath).getName().isEmpty()
+                        ? new java.io.File("AI_Generated_Report.html")
+                        : new java.io.File(new java.io.File(suggestedPath).getName()));
+                fc.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter(
+                        "HTML Files (*.html)", "html"));
+                if (fc.showSaveDialog(null) == javax.swing.JFileChooser.APPROVE_OPTION) {
+                    java.io.File chosen = fc.getSelectedFile();
+                    if (!chosen.getName().toLowerCase().endsWith(".html")) {
+                        chosen = new java.io.File(chosen.getAbsolutePath() + ".html");
+                    }
+                    result[0] = chosen.getAbsolutePath();
+                }
+            });
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IOException("Save dialog interrupted", e);
+        } catch (java.lang.reflect.InvocationTargetException e) {
+            throw new IOException("Save dialog failed: " + e.getCause().getMessage(), e);
+        }
+        return result[0];
+    }
+
     // ─────────────────────────────────────────────────────────────
 
     /**
