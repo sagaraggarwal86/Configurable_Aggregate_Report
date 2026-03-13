@@ -167,6 +167,55 @@ class AiProviderRegistryTest {
     }
 
     // ─────────────────────────────────────────────────────────────
+    // loadConfiguredProviders(Path) overload
+    // ─────────────────────────────────────────────────────────────
+
+    @Nested
+    @DisplayName("loadConfiguredProviders(Path) overload")
+    class LoadConfiguredProvidersPathTests {
+
+        @Test
+        @DisplayName("Path overload loads providers identically to File overload")
+        void pathOverloadLoadsProviders(@TempDir Path dir) throws IOException {
+            Path binDir = dir.resolve("bin");
+            Files.createDirectories(binDir);
+            Files.writeString(binDir.resolve("ai-reporter.properties"),
+                    "ai.reporter.groq.api.key=gsk_testkey\n",
+                    StandardCharsets.UTF_8);
+
+            // Path overload expects the properties file itself, not a directory
+            List<AiProviderConfig> fromPath = AiProviderRegistry.loadConfiguredProviders(
+                    binDir.resolve("ai-reporter.properties"));
+            // File overload expects jmeterHome; resolves bin/ai-reporter.properties internally
+            List<AiProviderConfig> fromFile = AiProviderRegistry.loadConfiguredProviders(
+                    dir.toFile());
+
+            assertEquals(fromFile.size(), fromPath.size(),
+                    "Path and File overloads must return the same number of providers");
+            if (!fromFile.isEmpty()) {
+                assertEquals(fromFile.get(0).providerKey, fromPath.get(0).providerKey,
+                        "Provider keys must match between overloads");
+            }
+        }
+
+        @Test
+        @DisplayName("Path overload with empty properties file returns empty list without throwing")
+        void pathOverloadEmptyDirReturnsEmpty(@TempDir Path dir) throws IOException {
+            // The Path overload opens the file directly — it requires the file to exist.
+            // An empty properties file is the correct way to assert an empty provider list.
+            Path emptyProps = dir.resolve("ai-reporter.properties");
+            Files.writeString(emptyProps, "", StandardCharsets.UTF_8);
+
+            assertDoesNotThrow(() -> {
+                List<AiProviderConfig> providers =
+                        AiProviderRegistry.loadConfiguredProviders(emptyProps);
+                assertNotNull(providers);
+                assertTrue(providers.isEmpty());
+            });
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────
     // Ping cache
     // ─────────────────────────────────────────────────────────────
 

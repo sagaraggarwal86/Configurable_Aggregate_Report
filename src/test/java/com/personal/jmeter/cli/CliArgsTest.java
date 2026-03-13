@@ -339,5 +339,146 @@ class CliArgsTest {
             assertEquals(200, cli.virtualUsers());
             assertEquals("Load Test", cli.scenarioName());
         }
+
+        @Test
+        @DisplayName("--description is parsed correctly")
+        void descriptionParsedCorrectly(@TempDir Path dir) throws IOException {
+            CliArgs cli = CliArgs.parse(new String[]{
+                    "--input", tempJtl(dir), "--provider", "groq",
+                    "--config", tempConfig(dir), "--description", "Soak test run"
+            });
+            assertEquals("Soak test run", cli.description());
+            assertTrue(cli.errors().isEmpty());
+        }
+
+        @Test
+        @DisplayName("--rt-metric PERCENTILE uppercase is accepted and normalised")
+        void rtMetricPercentileUppercaseAccepted(@TempDir Path dir) throws IOException {
+            CliArgs cli = CliArgs.parse(new String[]{
+                    "--input", tempJtl(dir), "--provider", "groq",
+                    "--config", tempConfig(dir), "--rt-metric", "PERCENTILE"
+            });
+            assertEquals("percentile", cli.rtMetric());
+            assertFalse(cli.errors().stream().anyMatch(e -> e.contains("--rt-metric")));
+        }
+
+        @Test
+        @DisplayName("flag as last arg with no value following produces error")
+        void flagAsLastArgProducesError(@TempDir Path dir) throws IOException {
+            CliArgs cli = CliArgs.parse(new String[]{
+                    "--input", tempJtl(dir), "--provider", "groq",
+                    "--config", tempConfig(dir), "--percentile"
+            });
+            assertTrue(cli.errors().stream().anyMatch(e -> e.contains("--percentile")));
+        }
+
+        @Test
+        @DisplayName("multiple validation errors are all accumulated")
+        void multipleErrorsAccumulated(@TempDir Path dir) throws IOException {
+            CliArgs cli = CliArgs.parse(new String[]{
+                    "--input", tempJtl(dir), "--provider", "groq",
+                    "--config", tempConfig(dir),
+                    "--percentile", "100", "--error-sla", "100"
+            });
+            assertTrue(cli.errors().stream().anyMatch(e -> e.contains("--percentile")));
+            assertTrue(cli.errors().stream().anyMatch(e -> e.contains("--error-sla")));
+            assertTrue(cli.errors().size() >= 2);
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // Boundary values
+    // ─────────────────────────────────────────────────────────────
+
+    @Nested
+    @DisplayName("Boundary values")
+    class BoundaryValueTests {
+
+        @Test
+        @DisplayName("chart-interval=0 is accepted (auto mode)")
+        void chartIntervalZeroAccepted(@TempDir Path dir) throws IOException {
+            CliArgs cli = CliArgs.parse(new String[]{
+                    "--input", tempJtl(dir), "--provider", "groq",
+                    "--config", tempConfig(dir), "--chart-interval", "0"
+            });
+            assertEquals(0, cli.chartInterval());
+            assertFalse(cli.errors().stream().anyMatch(e -> e.contains("--chart-interval")));
+        }
+
+        @Test
+        @DisplayName("chart-interval=3600 is accepted (maximum boundary)")
+        void chartIntervalMaxBoundaryAccepted(@TempDir Path dir) throws IOException {
+            CliArgs cli = CliArgs.parse(new String[]{
+                    "--input", tempJtl(dir), "--provider", "groq",
+                    "--config", tempConfig(dir), "--chart-interval", "3600"
+            });
+            assertEquals(3600, cli.chartInterval());
+            assertFalse(cli.errors().stream().anyMatch(e -> e.contains("--chart-interval")));
+        }
+
+        @Test
+        @DisplayName("chart-interval=-1 produces error (below minimum)")
+        void chartIntervalNegativeProducesError(@TempDir Path dir) throws IOException {
+            CliArgs cli = CliArgs.parse(new String[]{
+                    "--input", tempJtl(dir), "--provider", "groq",
+                    "--config", tempConfig(dir), "--chart-interval", "-1"
+            });
+            assertTrue(cli.errors().stream().anyMatch(e -> e.contains("--chart-interval")));
+        }
+
+        @Test
+        @DisplayName("error-sla=1 is accepted (minimum boundary)")
+        void errorSlaMinBoundaryAccepted(@TempDir Path dir) throws IOException {
+            CliArgs cli = CliArgs.parse(new String[]{
+                    "--input", tempJtl(dir), "--provider", "groq",
+                    "--config", tempConfig(dir), "--error-sla", "1"
+            });
+            assertEquals(1, cli.errorSla());
+            assertTrue(cli.hasErrorSla());
+            assertFalse(cli.errors().stream().anyMatch(e -> e.contains("--error-sla")));
+        }
+
+        @Test
+        @DisplayName("error-sla=99 is accepted (maximum boundary)")
+        void errorSlaMaxBoundaryAccepted(@TempDir Path dir) throws IOException {
+            CliArgs cli = CliArgs.parse(new String[]{
+                    "--input", tempJtl(dir), "--provider", "groq",
+                    "--config", tempConfig(dir), "--error-sla", "99"
+            });
+            assertEquals(99, cli.errorSla());
+            assertTrue(cli.hasErrorSla());
+            assertFalse(cli.errors().stream().anyMatch(e -> e.contains("--error-sla")));
+        }
+
+        @Test
+        @DisplayName("error-sla=0 produces no validation error but hasErrorSla() returns false")
+        void errorSlaZeroHasNoSla(@TempDir Path dir) throws IOException {
+            CliArgs cli = CliArgs.parse(new String[]{
+                    "--input", tempJtl(dir), "--provider", "groq",
+                    "--config", tempConfig(dir), "--error-sla", "0"
+            });
+            assertFalse(cli.hasErrorSla(), "errorSla=0 is not a valid SLA threshold");
+        }
+
+        @Test
+        @DisplayName("hasRtSla() returns false when --rt-sla not set")
+        void hasRtSlaFalseByDefault(@TempDir Path dir) throws IOException {
+            CliArgs cli = CliArgs.parse(new String[]{
+                    "--input", tempJtl(dir), "--provider", "groq",
+                    "--config", tempConfig(dir)
+            });
+            assertFalse(cli.hasRtSla());
+        }
+
+        @Test
+        @DisplayName("hasRtSla() returns true when --rt-sla is set")
+        void hasRtSlaTrueWhenSet(@TempDir Path dir) throws IOException {
+            CliArgs cli = CliArgs.parse(new String[]{
+                    "--input", tempJtl(dir), "--provider", "groq",
+                    "--config", tempConfig(dir), "--rt-sla", "2000"
+            });
+            assertTrue(cli.hasRtSla());
+            assertEquals(2000L, cli.rtSla());
+        }
     }
 }
