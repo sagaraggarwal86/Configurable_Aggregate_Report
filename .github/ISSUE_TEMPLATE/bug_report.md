@@ -8,7 +8,7 @@ assignees: ''
 ---
 
 **Plugin version**
-e.g. 3.6.0
+e.g. 3.7.0
 
 **Environment**
 - OS: [e.g. Windows 11, macOS 14, Ubuntu 22.04]

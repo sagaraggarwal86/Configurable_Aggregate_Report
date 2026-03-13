@@ -6,7 +6,7 @@
     <modelVersion>4.0.0</modelVersion>
     <groupId>io.github.sagaraggarwal86</groupId>
     <artifactId>Configurable_Aggregate_Report</artifactId>
-    <version>3.6.0</version>
+    <version>3.7.0</version>
     <packaging>jar</packaging>
     <name>Configurable Aggregate Report Plugin</name>
     <description>An AI-Powered listener plugin to prepare report for configurable parameters for Apache JMeter</description>
