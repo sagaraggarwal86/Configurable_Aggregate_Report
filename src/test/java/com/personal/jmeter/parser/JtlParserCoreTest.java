@@ -90,6 +90,13 @@ class JtlParserCoreTest {
             assertEquals(1, result.length);
             assertEquals("", result[0]);
         }
+
+        @Test
+        @DisplayName("null input throws NullPointerException — null is not a valid line")
+        void nullInputThrowsNullPointerException() {
+            assertThrows(NullPointerException.class,
+                    () -> JtlParserCore.splitCsvLine(null));
+        }
     }
 
     // ─────────────────────────────────────────────────────────────
@@ -233,6 +240,34 @@ class JtlParserCoreTest {
             assertFalse(JtlParserCore.shouldInclude(excluded, opts));
             assertTrue(JtlParserCore.shouldInclude(included,  opts));
         }
+
+        @Test
+        @DisplayName("startOffset and endOffset together — sample inside window is included")
+        void bothOffsetsIncludesSampleInWindow() {
+            JTLParser.FilterOptions opts = new JTLParser.FilterOptions();
+            opts.startOffset  = 10;
+            opts.endOffset    = 30;
+            opts.minTimestamp = 0L;
+            // total duration = 60s; window = [10s, 30s] → sample at 20s is inside
+            SampleResult inside  = sampleAt(20_000L, "Tx");
+            SampleResult before  = sampleAt(5_000L,  "Tx");
+            SampleResult after   = sampleAt(55_000L, "Tx");
+            assertTrue(JtlParserCore.shouldInclude(inside,  opts));
+            assertFalse(JtlParserCore.shouldInclude(before, opts));
+            assertFalse(JtlParserCore.shouldInclude(after,  opts));
+        }
+
+        @Test
+        @DisplayName("excludeLabels in regex mode excludes matching label")
+        void excludeLabelsRegex() {
+            JTLParser.FilterOptions opts = new JTLParser.FilterOptions();
+            opts.excludeLabels = "Check.*";
+            opts.regExp        = true;
+            SampleResult excluded = sampleAt(0, "Checkout");
+            SampleResult included = sampleAt(0, "Login");
+            assertFalse(JtlParserCore.shouldInclude(excluded, opts));
+            assertTrue(JtlParserCore.shouldInclude(included,  opts));
+        }
     }
 
     // ─────────────────────────────────────────────────────────────
@@ -309,6 +344,17 @@ class JtlParserCoreTest {
             List<JTLParser.TimeBucket> buckets =
                     JtlParserCore.buildTimeBuckets(map, 30_000L);
             assertEquals(0.0, buckets.get(0).avgResponseMs);
+        }
+
+        @Test
+        @DisplayName("single bucket has correct kbPerSec")
+        void singleBucketKbPerSec() {
+            TreeMap<Long, long[]> map = new TreeMap<>();
+            // 30720 bytes in a 30s bucket = 1.0 KB/s
+            map.put(0L, new long[]{500L, 1L, 0L, 30_720L});
+            List<JTLParser.TimeBucket> buckets =
+                    JtlParserCore.buildTimeBuckets(map, 30_000L);
+            assertEquals(1.0, buckets.get(0).kbps, 0.01);
         }
     }
 }

@@ -397,4 +397,72 @@ class JTLParserTest {
         assertEquals(0L, result.avgConnectMs,
                 "avgConnectMs must be 0 when latencyPresent is false");
     }
+
+    // ─────────────────────────────────────────────────────────────
+    // endOffset filtering
+    // ─────────────────────────────────────────────────────────────
+
+    @Test
+    @DisplayName("endOffset excludes samples whose relative time exceeds the offset")
+    void endOffsetExcludesSamples() throws IOException {
+        long baseTs = System.currentTimeMillis();
+        // sample at t=0s (relativeSec=0, within endOffset=30) — included
+        // sample at t=40s (relativeSec=40, beyond endOffset=30) — excluded
+        Path file = writeCsv(
+                baseTs + ",100,EarlyTx,200,OK,t-1,text,true,512,128,90,0,20",
+                (baseTs + 40_000L) + ",100,LateTx,200,OK,t-1,text,true,512,128,90,0,20");
+
+        JTLParser.FilterOptions opts = new JTLParser.FilterOptions();
+        opts.endOffset = 30; // exclude samples more than 30s after first sample
+
+        JTLParser.ParseResult result = new JTLParser().parse(file.toString(), opts);
+
+        assertTrue(result.results.containsKey("EarlyTx"),  "EarlyTx should be included");
+        assertFalse(result.results.containsKey("LateTx"),  "LateTx should be filtered out");
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // errorTypeSummary
+    // ─────────────────────────────────────────────────────────────
+
+    @Test
+    @DisplayName("errorTypeSummary is populated with response codes from failed samples")
+    void errorTypeSummaryPopulated() throws IOException {
+        long ts = System.currentTimeMillis();
+        Path file = writeCsv(
+                ts + ",300,Login,500,Internal Server Error,t-1,text,false,100,50,280,0,20",
+                (ts + 1000) + ",200,Login,500,Internal Server Error,t-1,text,false,100,50,180,0,20",
+                (ts + 2000) + ",150,Checkout,404,Not Found,t-1,text,false,100,50,130,0,20");
+
+        JTLParser.ParseResult result = new JTLParser().parse(
+                file.toString(), new JTLParser.FilterOptions());
+
+        assertNotNull(result.errorTypeSummary, "errorTypeSummary must not be null");
+        assertFalse(result.errorTypeSummary.isEmpty(), "errorTypeSummary must not be empty");
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // Multiple distinct labels
+    // ─────────────────────────────────────────────────────────────
+
+    @Test
+    @DisplayName("multiple distinct transaction labels are each aggregated independently")
+    void multipleDistinctLabels() throws IOException {
+        long ts = System.currentTimeMillis();
+        Path file = writeCsv(
+                ts + ",100,Login,200,OK,t-1,text,true,512,128,90,0,20",
+                (ts + 1000) + ",200,Checkout,200,OK,t-1,text,true,512,128,180,0,20",
+                (ts + 2000) + ",150,Search,200,OK,t-1,text,true,512,128,130,0,20");
+
+        JTLParser.ParseResult result = new JTLParser().parse(
+                file.toString(), new JTLParser.FilterOptions());
+
+        assertTrue(result.results.containsKey("Login"),    "Login must be present");
+        assertTrue(result.results.containsKey("Checkout"), "Checkout must be present");
+        assertTrue(result.results.containsKey("Search"),   "Search must be present");
+        assertTrue(result.results.containsKey("TOTAL"),    "TOTAL must be present");
+        assertEquals(1, result.results.get("Login").getCount(),    "Login count must be 1");
+        assertEquals(1, result.results.get("Checkout").getCount(), "Checkout count must be 1");
+        assertEquals(3, result.results.get("TOTAL").getCount(),    "TOTAL count must be 3");
+    }
 }
