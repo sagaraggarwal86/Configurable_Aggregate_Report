@@ -258,30 +258,34 @@ public class HtmlReportRenderer {
         public final String duration;
         /** Configured percentile (1–99). */
         public final int    percentile;
+        /** Display name of the AI provider used to generate the report (e.g. "Groq (Free)"). */
+        public final String providerDisplayName;
 
         /**
          * Constructs a render configuration.
          *
-         * @param users           virtual user count label (null → "")
-         * @param scenarioName    test plan name (null → "")
-         * @param scenarioDesc    test plan description (null → "")
-         * @param threadGroupName first thread group name (null → "")
-         * @param startTime       formatted start time (null → "")
-         * @param endTime         formatted end time (null → "")
-         * @param duration        formatted duration (null → "")
-         * @param percentile      configured percentile (1–99)
+         * @param users               virtual user count label (null → "")
+         * @param scenarioName        test plan name (null → "")
+         * @param scenarioDesc        test plan description (null → "")
+         * @param threadGroupName     first thread group name (null → "")
+         * @param startTime           formatted start time (null → "")
+         * @param endTime             formatted end time (null → "")
+         * @param duration            formatted duration (null → "")
+         * @param percentile          configured percentile (1–99)
+         * @param providerDisplayName AI provider display name shown in the report footer (null → "")
          */
         public RenderConfig(String users, String scenarioName, String scenarioDesc,
                             String threadGroupName, String startTime, String endTime,
-                            String duration, int percentile) {
-            this.users           = Objects.requireNonNullElse(users, "");
-            this.scenarioName    = Objects.requireNonNullElse(scenarioName, "");
-            this.scenarioDesc    = Objects.requireNonNullElse(scenarioDesc, "");
-            this.threadGroupName = Objects.requireNonNullElse(threadGroupName, "");
-            this.startTime       = Objects.requireNonNullElse(startTime, "");
-            this.endTime         = Objects.requireNonNullElse(endTime, "");
-            this.duration        = Objects.requireNonNullElse(duration, "");
-            this.percentile      = percentile;
+                            String duration, int percentile, String providerDisplayName) {
+            this.users               = Objects.requireNonNullElse(users, "");
+            this.scenarioName        = Objects.requireNonNullElse(scenarioName, "");
+            this.scenarioDesc        = Objects.requireNonNullElse(scenarioDesc, "");
+            this.threadGroupName     = Objects.requireNonNullElse(threadGroupName, "");
+            this.startTime           = Objects.requireNonNullElse(startTime, "");
+            this.endTime             = Objects.requireNonNullElse(endTime, "");
+            this.duration            = Objects.requireNonNullElse(duration, "");
+            this.percentile          = percentile;
+            this.providerDisplayName = Objects.requireNonNullElse(providerDisplayName, "");
         }
     }
 }

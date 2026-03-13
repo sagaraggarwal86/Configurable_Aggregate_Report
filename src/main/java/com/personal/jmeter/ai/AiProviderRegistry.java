@@ -97,7 +97,9 @@ public final class AiProviderRegistry {
             "gemini", "AIza"
     );
 
-    // ── Ping cache: providerKey → true (only successful pings are cached) ──
+    // ── Ping cache: "providerKey:apiKey" → true (only successful pings are cached).
+    //    Composite key ensures a rotated API key always produces a cache miss,
+    //    preventing stale validation bypass after key changes. ──────────────────
     private static final ConcurrentHashMap<String, Boolean> PING_CACHE =
             new ConcurrentHashMap<>();
 
@@ -161,7 +163,7 @@ public final class AiProviderRegistry {
         if (formatError != null) return formatError;
 
         // 2 — ping (skip if cached)
-        if (Boolean.TRUE.equals(PING_CACHE.get(config.providerKey))) {
+        if (Boolean.TRUE.equals(PING_CACHE.get(cacheKey(config)))) {
             log.debug("validateAndPing: ping cache hit for provider={}", config.providerKey);
             return null;
         }
@@ -170,13 +172,16 @@ public final class AiProviderRegistry {
     }
 
     /**
-     * Clears the ping cache entry for the given provider key.
+     * Clears the ping cache entry for the given provider configuration.
      * Useful after the user edits the properties file.
      *
-     * @param providerKey the provider key to evict
+     * <p>The cache is keyed on {@code providerKey + ":" + apiKey} so this method
+     * requires the full config to locate the correct entry.</p>
+     *
+     * @param config the provider config whose cache entry should be evicted
      */
-    public static void evictPingCache(String providerKey) {
-        PING_CACHE.remove(providerKey);
+    public static void evictPingCache(AiProviderConfig config) {
+        PING_CACHE.remove(cacheKey(config));
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -336,6 +341,25 @@ public final class AiProviderRegistry {
     }
 
     // ─────────────────────────────────────────────────────────────────────────
+    // Cache key
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Builds the composite ping-cache key from provider key and API key value.
+     *
+     * <p>Keying on both fields ensures that when a user rotates their API key
+     * and {@code ai-reporter.properties} is reloaded, the old cache entry never
+     * matches the new {@link AiProviderConfig} — forcing a fresh live ping rather
+     * than silently reusing a stale success result.</p>
+     *
+     * @param config provider configuration
+     * @return composite cache key in the form {@code "providerKey:apiKey"}
+     */
+    private static String cacheKey(AiProviderConfig config) {
+        return config.providerKey + ":" + config.apiKey;
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
     // Live ping
     // ─────────────────────────────────────────────────────────────────────────
 
@@ -364,24 +388,24 @@ public final class AiProviderRegistry {
             log.debug("executePing: provider={} status={}", config.providerKey, status);
 
             if (status >= 200 && status < 300) {
-                PING_CACHE.put(config.providerKey, Boolean.TRUE);
+                PING_CACHE.put(cacheKey(config), Boolean.TRUE);
                 return null;
             }
-            PING_CACHE.remove(config.providerKey);
+            PING_CACHE.remove(cacheKey(config));
             return buildPingErrorMessage(config, status, response.body());
 
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            PING_CACHE.remove(config.providerKey);
+            PING_CACHE.remove(cacheKey(config));
             return "Connection to " + config.displayName + " was interrupted. Please try again.";
         } catch (IOException e) {
-            PING_CACHE.remove(config.providerKey);
+            PING_CACHE.remove(cacheKey(config));
             log.warn("executePing: network error for provider={}. reason={}", config.providerKey, e.getMessage());
             return "Could not connect to " + config.displayName + ".\n\n"
                     + "Please check your network connection and that the base URL is correct:\n"
                     + "  " + config.baseUrl;
         } catch (RuntimeException e) {
-            PING_CACHE.remove(config.providerKey);
+            PING_CACHE.remove(cacheKey(config));
             log.error("executePing: unexpected runtime error for provider={}. reason={}", config.providerKey, e.getMessage(), e);
             throw e;
         }

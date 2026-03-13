@@ -223,10 +223,6 @@ public class AiReportCoordinator {
         progressDialog.dispose();
         triggerBtn.setEnabled(true);
         openInBrowser(htmlPath);
-        JOptionPane.showMessageDialog(triggerBtn.getParent(),
-                "AI Report saved to:\n" + htmlPath
-                        + "\n\nThe report has been opened in your browser.",
-                "Report Generated", JOptionPane.INFORMATION_MESSAGE);
     }
 
     private void onFailure(IOException ex, JDialog progressDialog, JButton triggerBtn) {

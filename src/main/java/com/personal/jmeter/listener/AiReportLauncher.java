@@ -120,9 +120,11 @@ final class AiReportLauncher {
     }
 
     /**
-     * Validates provider selection, validates and pings the API key, loads the prompt,
-     * builds the report context, shows the progress dialog, and submits the workflow
-     * to the background executor.
+     * Validates provider selection and loads the prompt on the EDT, then immediately
+     * disables the trigger button and shows the progress dialog before submitting work
+     * to the background executor. API key validation and the live ping are performed
+     * off the EDT so the UI remains responsive throughout.
+     * Re-enables the button and disposes the dialog on both success and failure.
      *
      * @param triggerBtn the button that initiated the workflow (re-enabled on completion)
      */
@@ -142,15 +144,6 @@ final class AiReportLauncher {
                             + "&nbsp;&nbsp;<tt>$JMETER_HOME/bin/ai-reporter.properties</tt><br><br>"
                             + "Set at least one provider's <tt>api.key</tt> to enable this feature.</html>",
                     "No Provider Configured", JOptionPane.WARNING_MESSAGE);
-            return;
-        }
-
-        String validationError = AiProviderRegistry.validateAndPing(providerConfig);
-        if (validationError != null) {
-            JOptionPane.showMessageDialog(parent,
-                    "<html><b>Cannot connect to " + providerConfig.displayName + ".</b><br><br>"
-                            + validationError.replace("\n", "<br>") + "</html>",
-                    "Provider Validation Failed", JOptionPane.ERROR_MESSAGE);
             return;
         }
 
@@ -175,7 +168,22 @@ final class AiReportLauncher {
                 new AiReportService(providerConfig),
                 new HtmlReportRenderer(),
                 executor);
-        coordinator.start(context, progressDialog, progressLabel, triggerBtn);
+        executor.submit(() -> {
+            SwingUtilities.invokeLater(() -> progressLabel.setText("Validating API key..."));
+            String pingError = AiProviderRegistry.validateAndPing(providerConfig);
+            if (pingError != null) {
+                SwingUtilities.invokeLater(() -> {
+                    progressDialog.dispose();
+                    triggerBtn.setEnabled(true);
+                    JOptionPane.showMessageDialog(parent,
+                            "<html><b>Cannot connect to " + providerConfig.displayName + ".</b><br><br>"
+                                    + pingError.replace("\n", "<br>") + "</html>",
+                            "Provider Validation Failed", JOptionPane.ERROR_MESSAGE);
+                });
+                return;
+            }
+            coordinator.start(context, progressDialog, progressLabel, triggerBtn);
+        });
     }
 
     // ─────────────────────────────────────────────────────────────
@@ -189,7 +197,7 @@ final class AiReportLauncher {
                 metadata.users, metadata.scenarioName, metadata.scenarioDesc,
                 metadata.threadGroupName,
                 dataProvider.getStartTime(), dataProvider.getEndTime(),
-                dataProvider.getDuration(), percentile);
+                dataProvider.getDuration(), percentile, providerDisplayName);
 
         final com.personal.jmeter.listener.SlaConfig sla = dataProvider.getSlaConfig();
         final String slaErrorPct = sla.isErrorPctEnabled()

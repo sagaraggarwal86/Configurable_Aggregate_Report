@@ -107,7 +107,7 @@ final class CliReportPipeline {
 
         // Step 9 — Render HTML
         progress("Rendering HTML report...");
-        HtmlReportRenderer.RenderConfig config = buildRenderConfig(result, timeCtx);
+        HtmlReportRenderer.RenderConfig config = buildRenderConfig(result, timeCtx, provider);
         String outputPath = new HtmlReportRenderer().renderToFile(
                 strippedMarkdown, args.outputFile(), config, tableRows, result.timeBuckets);
         progress("Report saved to: " + outputPath);
@@ -211,7 +211,8 @@ final class CliReportPipeline {
     // ─────────────────────────────────────────────────────────────
 
     private HtmlReportRenderer.RenderConfig buildRenderConfig(JTLParser.ParseResult result,
-                                                              TimeContext timeCtx) {
+                                                              TimeContext timeCtx,
+                                                              AiProviderConfig provider) {
         return new HtmlReportRenderer.RenderConfig(
                 timeCtx.users(),
                 args.scenarioName(),
@@ -220,7 +221,8 @@ final class CliReportPipeline {
                 timeCtx.startTime(),
                 timeCtx.endTime(),
                 timeCtx.duration(),
-                args.percentile());
+                args.percentile(),
+                provider.displayName);
     }
 
     // ─────────────────────────────────────────────────────────────

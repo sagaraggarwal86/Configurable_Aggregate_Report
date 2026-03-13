@@ -175,10 +175,13 @@ class AiProviderRegistryTest {
     class PingCacheTests {
 
         @Test
-        @DisplayName("evictPingCache does not throw for non-existent key")
+        @DisplayName("evictPingCache does not throw for a config that was never cached")
         void evictNonExistentKeyNoThrow() {
-            assertDoesNotThrow(() -> AiProviderRegistry.evictPingCache("nonexistent"),
-                    "evictPingCache should not throw for a key that was never cached");
+            AiProviderConfig config = new AiProviderConfig(
+                    "nonexistent", "Nonexistent", "key-never-cached", "some-model",
+                    "https://nonexistent.example/v1", 60, 4096, 0.3);
+            assertDoesNotThrow(() -> AiProviderRegistry.evictPingCache(config),
+                    "evictPingCache should not throw for a config that was never cached");
         }
     }
 }

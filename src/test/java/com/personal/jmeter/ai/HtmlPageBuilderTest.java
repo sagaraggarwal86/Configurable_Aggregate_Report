@@ -12,14 +12,15 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * Unit tests for {@link HtmlPageBuilder#convertPipeTablesToHtml}
- * and {@link HtmlPageBuilder#buildChartsSection}.
+ * Unit tests for {@link HtmlPageBuilder#convertPipeTablesToHtml},
+ * {@link HtmlPageBuilder#stripRawHtml}, and {@link HtmlPageBuilder#buildChartsSection}.
  *
  * <p>No file system, no network, no Swing — pure in-memory verification of
  * the pipe-table pre-processor's branching: separator-row detection, multi-row
  * tables, cell escaping, and non-table lines pass-through.
- * Also verifies that {@code buildChartsSection} always renders a section header
- * regardless of bucket count.</p>
+ * Also verifies that {@code stripRawHtml} removes raw HTML blocks while
+ * preserving Markdown content, and that {@code buildChartsSection} always
+ * renders a section header regardless of bucket count.</p>
  */
 @DisplayName("HtmlPageBuilder — convertPipeTablesToHtml")
 class HtmlPageBuilderTest {
@@ -170,6 +171,86 @@ class HtmlPageBuilderTest {
             assertTrue(result.contains("Before the table."));
             assertTrue(result.contains("<table>"));
             assertTrue(result.contains("After the table."));
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // stripRawHtml
+    // ─────────────────────────────────────────────────────────────
+
+    @Nested
+    @DisplayName("stripRawHtml — raw HTML block removal")
+    class StripRawHtmlTests {
+
+        @Test
+        @DisplayName("null input returns null unchanged")
+        void nullReturnsNull() {
+            assertNull(HtmlPageBuilder.stripRawHtml(null));
+        }
+
+        @Test
+        @DisplayName("blank input returns blank unchanged")
+        void blankReturnsBlank() {
+            String blank = "   ";
+            assertEquals(blank, HtmlPageBuilder.stripRawHtml(blank));
+        }
+
+        @Test
+        @DisplayName("opening script tag line is stripped")
+        void scriptTagStripped() {
+            String input = "Some text\n<script>alert('xss')</script>\nMore text";
+            String result = HtmlPageBuilder.stripRawHtml(input);
+            assertFalse(result.contains("<script>"), "script tag line must be stripped");
+            assertTrue(result.contains("Some text"),  "preceding text must be preserved");
+            assertTrue(result.contains("More text"),  "following text must be preserved");
+        }
+
+        @Test
+        @DisplayName("iframe tag line is stripped")
+        void iframeTagStripped() {
+            String input = "Before\n<iframe src=\"evil.com\"></iframe>\nAfter";
+            String result = HtmlPageBuilder.stripRawHtml(input);
+            assertFalse(result.contains("<iframe"), "iframe line must be stripped");
+            assertTrue(result.contains("Before"));
+            assertTrue(result.contains("After"));
+        }
+
+        @Test
+        @DisplayName("closing tag line is stripped")
+        void closingTagStripped() {
+            String input = "Before\n</div>\nAfter";
+            String result = HtmlPageBuilder.stripRawHtml(input);
+            assertFalse(result.contains("</div>"), "closing tag line must be stripped");
+            assertTrue(result.contains("Before"));
+            assertTrue(result.contains("After"));
+        }
+
+        @Test
+        @DisplayName("pipe table rows are preserved — they start with | not <")
+        void pipeTableRowPreserved() {
+            String input = "| Header |\n|---|\n| Cell |";
+            String result = HtmlPageBuilder.stripRawHtml(input);
+            assertTrue(result.contains("| Header |"), "pipe table header must be preserved");
+            assertTrue(result.contains("| Cell |"),   "pipe table cell must be preserved");
+        }
+
+        @Test
+        @DisplayName("inline HTML within a sentence is preserved — only full-line blocks are stripped")
+        void inlineHtmlInSentencePreserved() {
+            String input = "Use **bold** and check <a href=\"x\">link</a> inline.";
+            String result = HtmlPageBuilder.stripRawHtml(input);
+            // Line starts with 'U', not '<' — should pass through unchanged
+            assertTrue(result.contains("inline."), "inline HTML in prose must not be stripped");
+        }
+
+        @Test
+        @DisplayName("plain Markdown prose is fully preserved")
+        void markdownProsePreserved() {
+            String input = "## Heading\n\nSome **bold** and _italic_ text.\n\n- item 1\n- item 2";
+            String result = HtmlPageBuilder.stripRawHtml(input);
+            assertTrue(result.contains("## Heading"));
+            assertTrue(result.contains("Some **bold**"));
+            assertTrue(result.contains("- item 1"));
         }
     }
 
