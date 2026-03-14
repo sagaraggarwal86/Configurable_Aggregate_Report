@@ -80,6 +80,23 @@ Every numeric claim must be drawn from the input data.
     determined it — name the metric, its observed value, and the SLA
     threshold. If no SLA is configured, state the dominant bottleneck
     classification derived from the Bottleneck Analysis section.
+    Determine the verdict using this logic before writing this sentence:
+      Step 1 — Check configured SLA thresholds:
+        If errorSlaThresholdPct is configured:
+          Compare globalStats.errorRatePct against it.
+        If rtSlaThresholdMs is configured:
+          Compare the metric specified by rtSlaMetric against it
+          (either avgResponseMs or the configured percentile value).
+      Step 2 — Assign verdict:
+        Any SLA breached    → FAIL
+        All SLAs met        → PASS
+        No SLAs configured  → use fallback rules in Step 3
+      Step 3 — No-SLA fallback:
+        CAPACITY-WALL    → FAIL
+        ERROR-BOUND      → FAIL
+        LATENCY-BOUND    → FAIL if p99 > 5x avgResponseMs, else PASS
+        THROUGHPUT-BOUND → PASS
+    This verdict must match the verdict in the Verdict section exactly.
 
   Sentence 3: Describe the performance characteristic that most defines
     this run. Choose the single most telling value from: throughput ceiling,
