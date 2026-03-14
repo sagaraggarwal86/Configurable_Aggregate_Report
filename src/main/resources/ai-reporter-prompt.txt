@@ -96,7 +96,6 @@ Every numeric claim must be drawn from the input data.
         ERROR-BOUND      → FAIL
         LATENCY-BOUND    → FAIL if p99 > 5x avgResponseMs, else PASS
         THROUGHPUT-BOUND → PASS
-    This verdict must match the verdict in the Verdict section exactly.
 
   Sentence 3: Describe the performance characteristic that most defines
     this run. Choose the single most telling value from: throughput ceiling,
