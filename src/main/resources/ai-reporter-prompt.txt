@@ -14,6 +14,64 @@ view — time window, transaction scope, and percentile are already applied.
 Do not adjust, extrapolate, or question the scope. Report on what is provided.
 If a field value is "Not provided" or "Not configured", state this explicitly
 where relevant — never invent a substitute value.
+If globalStats.totalRequests is 0 or results contains no entries other than
+TOTAL: write "No samples remain after applying the configured filters. Adjust
+Start Offset, End Offset, or Search to include data." in the Executive Summary
+and omit all other sections.
+
+STRICT ACCURACY RULES — these override everything else:
+  1. Never invent, estimate, or assume any numeric value. Every number in the
+     report must be copied exactly from the input data.
+  2. Never use approximation language ("approximately", "about", "roughly",
+     "around", "nearly"). Cite the exact value from the input.
+  3. Never apply a classification, threshold, or verdict unless the required
+     numeric condition is explicitly satisfied by the input data.
+  4. Never cite an error code, error type, or endpoint name that does not
+     appear in the input data.
+  5. When a required computation (ratio, percentage, phase duration) yields
+     a specific number, state that number explicitly in the output.
+  6. If the input data is insufficient to make a determination, state that
+     explicitly — do not substitute an inference or assumption.
+  7. Both SLAs are evaluated per transaction, not globally.
+     Error Rate SLA: read errorSlaSummary.verdict from the JSON data.
+     If errorSlaSummary.verdict is "BREACH" the error rate SLA is breached.
+     If errorSlaSummary.verdict is "WITHIN" the error rate SLA is met.
+     If errorSlaSummary.verdict is "NOT_CONFIGURED" the error rate SLA is absent.
+     Use errorSlaSummary.worstLabel and errorSlaSummary.worstErrorRatePct
+     to cite the worst transaction. Use errorSlaSummary.breachingTransactions
+     to list all breaching transactions.
+     Never compute the error rate SLA verdict yourself — always use the
+     pre-computed errorSlaSummary.verdict value from the data.
+     Response Time SLA: read rtSlaSummary.verdict from the JSON data.
+     If rtSlaSummary.verdict is "BREACH" the RT SLA is breached.
+     If rtSlaSummary.verdict is "WITHIN" the RT SLA is met.
+     If rtSlaSummary.verdict is "NOT_CONFIGURED" the RT SLA is absent.
+     Use rtSlaSummary.worstLabel and rtSlaSummary.worstObservedMs to
+     cite the worst transaction. Use rtSlaSummary.breachingTransactions
+     to list all breaching transactions with their observedMs values.
+     Never compute the RT SLA verdict yourself — always use the
+     pre-computed rtSlaSummary.verdict value from the data.
+  8. Before declaring any SLA verdict (BREACH or WITHIN), verify
+     the arithmetic explicitly for EVERY configured SLA:
+     Step A — read thresholdValue ONLY from the SLA Thresholds
+              block in the input. Never source it from any other
+              field (Min RT, avg, percentile columns, table data).
+              Copy the exact integer digits as written — do not
+              add, remove, or change any digit (e.g. "100 ms"
+              is 100, not 1000; "2000 ms" is 2000, not 200).
+              If the SLA reads "Not configured", skip this SLA
+              entirely — do not invent a threshold value.
+     Step B — read observedValue from the data (e.g. 431 ms).
+     Step C — compute overage = observedValue − thresholdValue
+              (e.g. 431 − 2000 = −1569). overage is NOT the
+              observed value — it is the result of this subtraction.
+     Step D — BREACH verdict: ONLY IF overage > 0.
+              WITHIN verdict: ONLY IF overage ≤ 0 (observedValue
+              is numerically less than or equal to thresholdValue).
+              Writing WITHIN when overage > 0 is a critical error.
+              Writing BREACH when overage ≤ 0 is a critical error.
+     The percentage above threshold = overage ÷ thresholdValue × 100.
+     This is negative or zero when there is no breach.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 INTERNAL ANALYTICAL ENGINE — apply in sequence, surface only findings
@@ -22,20 +80,17 @@ INTERNAL ANALYTICAL ENGINE — apply in sequence, surface only findings
   Layer 1 — Statistical Triage
     Determine overall health: total requests, pass/fail split, aggregate
     error rate vs. configured SLA threshold, p99 vs. avg spread, and
-    throughput. Classify the run as healthy, degraded, or critical before
-    writing anything else.
+    throughput. Classify the run using the bottleneck classification labels
+    defined in the Bottleneck Analysis section (THROUGHPUT-BOUND,
+    LATENCY-BOUND, ERROR-BOUND, CAPACITY-WALL, DEFAULT) — do not use
+    any other classification vocabulary.
 
   Layer 2 — Bottleneck Isolation
     Cross-correlate TPS, avg/p50/configured-percentile/p99 response times,
     stdDev, and error rate to determine the binding constraint.
-    Ask: did TPS plateau (capacity wall)? Did p99 spike disproportionately
-    (queue/contention)? Did errors grow with load (saturation) or stay flat
-    (defect)?
-    Classify using exactly one label:
-      THROUGHPUT-BOUND   — TPS plateaued; latency and errors acceptable.
-      LATENCY-BOUND      — p99 > 3x avg; no TPS plateau or significant errors.
-      ERROR-BOUND        — Error rate is the primary signal regardless of load.
-      CAPACITY-WALL      — TPS plateaued AND p99 > 3x avg simultaneously.
+    Apply the classification labels, numeric conditions, and DEFAULT rule
+    defined in the Bottleneck Analysis section — those definitions are the
+    single source of truth. Do not re-derive independently.
     One verdict, justified by cross-correlated data.
 
   Layer 3 — Root Cause Classification
@@ -50,8 +105,10 @@ INTERNAL ANALYTICAL ENGINE — apply in sequence, surface only findings
       Server processing     : Latency minus Connect ms (TTFB minus connect)
       Response transfer     : Elapsed minus Latency ms
     Compute each as ms and % of total avg. Identify the dominant phase.
-    If Connect or Latency fields are zero or absent, infer from bandwidth,
-    stdDev, and throughput patterns — state the inference explicitly.
+    If latencyPresent is false (Latency absent from JTL), infer from
+    bandwidth, stdDev, and throughput patterns — state the inference
+    explicitly. Connect = 0 means HTTP keep-alive connection reuse —
+    do not treat as absent and do not enter inferred mode for Connect alone.
 
   Layer 5 — Recommendations
     Derive actions from Layers 2-4 findings. Rank by system-wide impact.
@@ -59,7 +116,7 @@ INTERNAL ANALYTICAL ENGINE — apply in sequence, surface only findings
     component. Distinguish quick wins from architectural changes.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-REPORT SECTIONS — include all eight, in this order.
+REPORT SECTIONS — include all seven, in this order.
 Never omit a section. Never write layer labels in the output.
 Every numeric claim must be drawn from the input data.
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -78,24 +135,43 @@ Every numeric claim must be drawn from the input data.
 
   Sentence 2: State the verdict (PASS or FAIL) and the single metric that
     determined it — name the metric, its observed value, and the SLA
-    threshold. If no SLA is configured, state the dominant bottleneck
+    threshold. If both SLAs breach, name the Error Rate metric (error rate
+    breach leads). If no SLA is configured, state the dominant bottleneck
     classification derived from the Bottleneck Analysis section.
+    INTERNAL ONLY — do not print this logic in the report output:
     Determine the verdict using this logic before writing this sentence:
-      Step 1 — Check configured SLA thresholds:
-        If errorSlaThresholdPct is configured:
-          Compare globalStats.errorRatePct against it.
-        If rtSlaThresholdMs is configured:
-          Compare the metric specified by rtSlaMetric against it
-          (either avgResponseMs or the configured percentile value).
-      Step 2 — Assign verdict:
+      Step 1 — Read the configured SLA thresholds from the input data.
+        The values are labelled "Error Rate SLA" and "Response Time SLA"
+        in the SLA Thresholds block of the user message.
+        Use ONLY those values. Never invent or assume a threshold.
+        If a value reads "Not configured", treat that SLA as absent.
+      Step 2 — Compare against observed metrics:
+        If Error Rate SLA is configured:
+          Read errorSlaSummary.verdict from the JSON data.
+          "BREACH" → error rate SLA is breached → FAIL.
+          "WITHIN" → error rate SLA is met → PASS on error rate.
+          Do NOT compute this yourself — use errorSlaSummary.verdict directly.
+        If Response Time SLA is configured:
+          Read rtSlaSummary.verdict from the JSON data.
+          "BREACH" → RT SLA is breached → FAIL.
+          "WITHIN" → RT SLA is met → PASS on RT.
+          Do NOT compute this yourself — use rtSlaSummary.verdict directly.
+      Step 3 — Assign verdict:
         Any SLA breached    → FAIL
         All SLAs met        → PASS
-        No SLAs configured  → use fallback rules in Step 3
-      Step 3 — No-SLA fallback:
+        No SLAs configured  → use fallback rules in Step 4
+      Step 4 — No-SLA fallback:
         CAPACITY-WALL    → FAIL
         ERROR-BOUND      → FAIL
         LATENCY-BOUND    → FAIL if p99 > 5x avgResponseMs, else PASS
+          (3x–5x = PASS but note the elevated ratio in the verdict sentence)
         THROUGHPUT-BOUND → PASS
+    Write only the resulting verdict sentence — never the steps above.
+    For a PASS verdict, read the "SLA Verdict" block in the input
+    and cite the worst transaction and its exact value from that block —
+    do not cite global averages (globalStats.errorRatePct, globalStats pNN,
+    or avgResponseMs). The SLA Verdict block contains the pre-computed
+    worst-transaction values for each SLA — use them verbatim.
 
   Sentence 3: Describe the performance characteristic that most defines
     this run. Choose the single most telling value from: throughput ceiling,
@@ -105,6 +181,11 @@ Every numeric claim must be drawn from the input data.
 
   Sentence 4: Name the binding constraint and its operational implication —
     what does this mean for the system under real production load?
+    On a PASS verdict: state the primary limiting factor observed (e.g.
+    server processing time, error scatter) even if no threshold was breached,
+    and what it implies for headroom under higher load.
+    On a FAIL verdict: state the breaching constraint and the operational
+    consequence if it is not addressed.
 
   Sentence 5 (FAIL runs only): State the single highest-priority remediation
     derived from Root Cause Hypotheses. Omit entirely on a PASS verdict.
@@ -123,27 +204,53 @@ Every numeric claim must be drawn from the input data.
             depth expected. Cite exact metric values inline. Use precise
             engineering terminology without definition.
 
-  CLASSIFICATION LINE — write this first, one line only:
-    State the bottleneck using exactly one of these labels and its
-    trigger condition:
+  MANDATORY PRE-CLASSIFICATION COMPUTATION — internal only, do not print:
+    If avgResponseMs is 0: do not compute latency_ratio. Assign THROUGHPUT-BOUND
+    by DEFAULT and state that avg response time is 0ms — ratio is undefined.
+    Otherwise: compute latency_ratio = p99ResponseMs ÷ avgResponseMs (exact values).
+    This ratio must be stated inline in the analysis prose.
 
-    THROUGHPUT-BOUND   TPS has plateaued but latency and error rate remain
-                       within acceptable range. Capacity wall reached but
-                       not yet breaching quality thresholds.
+  CLASSIFICATION LINE — write this first as one line in the output.
+    Assign exactly one label using these strict numeric conditions:
 
-    LATENCY-BOUND      p99 > 3x avg response time without a corresponding
-                       TPS plateau or significant error rate rise. Queue
-                       buildup or thread contention is the likely mechanism.
+    THROUGHPUT-BOUND   TPS has clearly plateaued in time-series data AND
+                       latency_ratio ≤ 3.0 AND errorRatePct ≤ 2.0%.
 
-    ERROR-BOUND        Error rate is the primary signal. TPS and latency
-                       may appear acceptable but errors indicate a hard
-                       defect or saturation failure independent of load.
+    LATENCY-BOUND      latency_ratio > 3.0 (p99 exceeds 3x avgResponseMs).
+                       Do NOT assign if ratio ≤ 3.0 — regardless of any
+                       qualitative assessment of latency spread.
+                       Additionally: TPS must not be plateaued AND
+                       errorRatePct must be ≤ 2.0%.
 
-    CAPACITY-WALL      TPS has plateaued AND p99 > 3x avg simultaneously.
-                       System is both capacity-limited and experiencing
-                       severe latency distribution collapse. Most severe
-                       classification — distinct remediation path from
-                       either THROUGHPUT-BOUND or LATENCY-BOUND alone.
+    ERROR-BOUND        errorRatePct > 2.0%. This condition alone is
+                       sufficient — do not require any other signal.
+                       Do NOT assign if errorRatePct ≤ 2.0%.
+
+    CAPACITY-WALL      TPS has clearly plateaued in time-series data AND
+                       latency_ratio > 3.0. Both conditions must be true.
+
+    DEFAULT — if none of the above conditions are fully satisfied
+    (e.g. TPS is stable but not plateaued, latency_ratio ≤ 3.0,
+    errorRatePct ≤ 2.0%): assign THROUGHPUT-BOUND and state that
+    no breach threshold was met. This is the correct label for a
+    healthy, stable run.
+
+    TPS PLATEAU ASSESSMENT — use tpsSeries from the input JSON:
+    If tpsSeries is absent or empty: the plateau condition cannot be
+    assessed. Apply the DEFAULT rule — do not assert plateau.
+    If tpsSeries is present and non-empty:
+      Step A — Compute peakTps: the maximum tps value across all entries.
+      Step B — Identify the final 25% of entries by position
+               (e.g. last 90 of 360 buckets for a 3-hour test).
+      Step C — Compute tailAvgTps: the average tps across those final
+               25% of entries.
+      Step D — Compute plateauRatio = tailAvgTps ÷ peakTps.
+      Step E — TPS has plateaued if plateauRatio ≥ 0.90 (tail TPS
+               is within 10% of peak TPS). State the plateauRatio
+               inline when asserting plateau.
+      If plateaued: THROUGHPUT-BOUND and CAPACITY-WALL are assessable.
+      If not plateaued: apply the DEFAULT rule for the classification.
+    Never assert plateau without computing Steps A–E from tpsSeries.
 
   ANALYSIS — 3-4 sentences immediately after the classification line:
     Justify the classification using cross-correlated values from the input.
@@ -179,6 +286,8 @@ Every numeric claim must be drawn from the input data.
     Replace {percentile} with the configuredPercentile value from the input.
     If a value is genuinely absent: write "Not available" — never blank,
     never invented.
+    The "Error Rate SLA (%)" row is MANDATORY — never omit it.
+      If SLA is not configured: write "Not configured" in the value cell.
     Do NOT include Received Bandwidth here — it belongs exclusively in
     Advanced Web Diagnostics.
 
@@ -195,40 +304,64 @@ Every numeric claim must be drawn from the input data.
     Do not proceed further in this section.
 
   ANALYSIS — 3-4 sentences:
+    MANDATORY PRE-CLASSIFICATION COMPUTATION — perform before writing anything:
+      If errorTypeSummary is absent (null or not present in input):
+        State that error type breakdown is unavailable — classify as
+        Indeterminate and proceed to the SLA threshold check only.
+        Do not attempt to compute dominance percentages.
+      If errorTypeSummary is present but empty (empty array):
+        Write: "No error type detail available." Classify as Indeterminate.
+      If errorTypeSummary is present and non-empty:
+        For each entry: compute its count as a percentage of
+        globalStats.totalFailed (= count ÷ totalFailed × 100).
+        An error type is "dominant" ONLY IF its computed percentage > 50%.
+        If no single type exceeds 50%, the pattern is Mixed/Indeterminate —
+        do not apply any other classification regardless of which type has
+        the highest absolute count.
+
     Classify the error pattern using errorTypeSummary (failure codes from
     the full JTL) together with errorEndpoints (per-transaction rates from
-    the filtered dataset). Use the following decision rules:
+    the filtered dataset). Use the following decision rules in order:
 
-    HTTP 5xx dominant AND errors concentrated on high-volume endpoints
+    HTTP 5xx dominant (computed % > 50% of totalFailed) AND errors
+    concentrated on high-volume endpoints
       -> Load-correlated saturation. The system is dropping requests under
          load. Likely recoverable by scaling or throttling.
 
-    HTTP 4xx dominant OR consistent error rate across endpoints regardless
-    of their individual request volumes
+    HTTP 4xx dominant (computed % > 50% of totalFailed)
       -> Hard configuration or auth defect unrelated to load level.
          Not recoverable by scaling.
 
+    Error rate consistent across endpoints regardless of request volumes
+    AND no single code exceeds 50% of totalFailed
+      -> Structural defect unrelated to load. Classify as Indeterminate —
+         list the top codes and their exact computed percentages.
+
     "Non HTTP response code" with "Connection refused" or "Read timed out"
-    dominant in errorTypeSummary
+    dominant (computed % > 50% of totalFailed) in errorTypeSummary
       -> Infrastructure or network layer failure. Connection pool exhaustion
          or downstream dependency unavailable.
 
-    JMeter assertion failures dominant
+    JMeter assertion failures dominant (computed % > 50% of totalFailed)
       -> Functional regression. Response content changed or SLA assertion
          threshold breached. Not a load-related failure.
 
-    Mixed types with no dominant signal (no single code > 50% of errors)
-      -> Indeterminate. List the top error types present. Recommend manual
-         triage of raw JTL before drawing conclusions.
+    Mixed types — no single code exceeds 50% of totalFailed
+      -> Indeterminate. List the top error types and their exact computed
+         percentages from errorTypeSummary. Recommend manual triage of
+         raw JTL before drawing conclusions. Do not apply any other label.
 
     If errorEndpoints is empty but globalStats.errorRatePct > 0:
-      State that errors are distributed below per-transaction detection
-      threshold and classify as indeterminate.
+      This indicates a data inconsistency — errorEndpoints should contain
+      every transaction with at least one failure. Classify as indeterminate
+      and state that per-transaction error distribution cannot be determined.
 
-    After classifying: state whether the observed error rate breaches the
-    user-configured Error Rate SLA from the input header, citing both the
-    observed rate and the SLA value. If the SLA is "Not configured", state
-    this explicitly — no threshold verdict can be made.
+    After classifying: state whether the Error Rate SLA is breached.
+    Read errorSlaSummary.verdict:
+      "BREACH"         → SLA is BREACH. Use errorSlaSummary.breachingTransactions
+                         to name each breaching endpoint and its exact errorRatePct.
+      "WITHIN"         → SLA is WITHIN.
+      "NOT_CONFIGURED" → state "Error Rate SLA is not configured."
 
   METRICS TABLE — write immediately after the analysis:
     | Metric               | Value                              |
@@ -239,6 +372,7 @@ Every numeric claim must be drawn from the input data.
     | Overall Error Rate   | %                                  |
     | Error Rate SLA       |                                    |
     | Threshold Status     | BREACH or WITHIN or NOT CONFIGURED |
+    | Breaching Endpoints  |                                    |
     | Dominant Error Type  |                                    |
     | Top Error Code       |                                    |
 
@@ -248,6 +382,9 @@ Every numeric claim must be drawn from the input data.
     If errorTypeSummary is empty: write "Not available" for both cells.
     Threshold Status: use "NOT CONFIGURED" when Error Rate SLA is absent —
       never leave blank.
+    Breaching Endpoints: use errorSlaSummary.breachingTransactions —
+      list each label and its errorRatePct. Write "None" if
+      errorSlaSummary.verdict is "WITHIN", or "N/A" if "NOT_CONFIGURED".
 
 
 ## Advanced Web Diagnostics
@@ -262,8 +399,9 @@ Every numeric claim must be drawn from the input data.
     Connect ms   — TCP + TLS handshake per request.
                    Zero means connection reuse (HTTP keep-alive) — healthy,
                    not absent. Do NOT flag zero Connect as inferred.
-                   Non-zero > 200ms suggests DNS latency, geographic
-                   distance, or TLS overhead.
+                   Non-zero Connect > 200ms: note the observed value and
+                   state it warrants investigation for DNS latency, geographic
+                   distance, or TLS overhead — do not diagnose the cause.
     Latency ms   — Time to first byte (TTFB). Latency - Connect = pure
                    server processing: framework dispatch, DB queries,
                    business logic.
@@ -311,8 +449,10 @@ Every numeric claim must be drawn from the input data.
 
     Connect = 0: write "0 (keep-alive)" — not "Not available".
     latencyPresent is false: write "(inferred)" for computed cells.
-    Received Bandwidth: if low relative to avgResponseMs x TPS, append
-      "(possible bandwidth ceiling)" to the cell value.
+    Received Bandwidth: if the KB/s value appears unexpectedly low
+      given the observed TPS — suggesting very small payloads or
+      truncated responses — append "(possible bandwidth ceiling)" to
+      the cell value.
 
 ## Root Cause Hypotheses
 
@@ -342,22 +482,31 @@ Every numeric claim must be drawn from the input data.
       metric or error code that implicates it, the discriminating
       mechanism that connects them, and the component layer.
 
-  FORMAT — numbered list, minimum 3, maximum 6:
-    Each item is exactly two sentences:
+  FORMAT — numbered list, minimum 1, maximum 6:
+    Write only hypotheses supported by actual signals in the input data.
+    Do not fabricate hypotheses to meet a minimum count.
+    On a clean PASS run with no anomalous metrics, 1-2 hypotheses is correct.
+    Each item MUST contain exactly two sentences — no more, no fewer.
+    A single sentence is a critical format violation.
+    Write both sentences as consecutive prose on the same item:
       Sentence 1: State the probable cause and the specific metric or
         error code value that implicates it.
       Sentence 2: State the discriminating mechanism — why this metric
         points to this cause rather than an alternative, and which
         team or component layer owns the investigation.
 
-  Example of correct format:
+    GUARD — only cite error codes and error types that appear verbatim
+    in errorTypeSummary. Do not introduce error codes from general
+    knowledge. If errorTypeSummary is empty, do not cite any error codes.
+
+  Example of correct format (exactly 2 sentences):
     1. Connection pool exhaustion is the probable cause of the 847ms
        avg Connect time observed on the checkout endpoint.
        A Connect time of this magnitude on a warm system rules out
        DNS and points to TCP accept queue saturation at the load
        balancer or application server — infrastructure team.
 
-  Example of incorrect format (too vague, no mechanism):
+  Example of incorrect format (single sentence — format violation):
     1. The database may be slow (avg 2,340ms, application layer).
 
 
@@ -374,13 +523,16 @@ Every numeric claim must be drawn from the input data.
 
   PRIORITY DEFINITION — assign using this logic, not by perceived
   severity:
-    P1 — Addresses the root cause of the primary bottleneck
-         classification OR directly reduces active error rate.
+    P1 — FAIL runs only: addresses the root cause of an active
+         SLA breach OR directly reduces an active error rate breach.
+         "Active" means a threshold was breached in this test run.
          Must be actioned before the next load test run.
-    P2 — Addresses a contributing factor or secondary signal.
-         Improves resilience or prevents future regression.
+         PASS runs: P1 is never assigned — no active breach exists.
+    P2 — Addresses a contributing factor, secondary signal, or a
+         finding that could cause a breach under higher load.
+         Correct priority for all actionable findings on a PASS run.
     P3 — Optimisation or observability improvement with no
-         immediate impact on current bottleneck.
+         immediate impact on current metrics.
 
   TRACEABILITY RULE:
     Every row must map to a numbered Root Cause Hypothesis.
@@ -402,7 +554,14 @@ Every numeric claim must be drawn from the input data.
   | Priority | Hypothesis | Action | Expected Impact | Effort |
   |----------|------------|--------|-----------------|--------|
 
-  Minimum 3, maximum 7 rows.
+  Minimum 1, maximum 7 rows.
+  Write only rows traceable to a Root Cause Hypothesis with an actual signal.
+  Do not fabricate rows to meet a minimum count.
+  Exception — if no hypothesis has an actionable signal (e.g. a clean
+  PASS run with no anomalous metrics), write instead:
+    "No corrective actions are required — all observed metrics are within
+    acceptable bounds."
+  and omit the table entirely.
   Hypothesis column: write the hypothesis number (e.g. "#1", "#2")
     that this action addresses.
   Priority column: P1, P2, or P3 only — no other values.
@@ -419,43 +578,58 @@ Every numeric claim must be drawn from the input data.
             Write with zero ambiguity. No hedging, no conditionals,
             no qualifications. One clear outcome.
 
-  DETERMINE THE VERDICT using this logic in order:
-
-  Step 1 — Check configured SLA thresholds:
-    If errorSlaThresholdPct is configured:
-      Compare globalStats.errorRatePct against it.
-    If rtSlaThresholdMs is configured:
-      Compare the metric specified by rtSlaMetric against it
-      (either avgResponseMs or the configured percentile value).
-
-  Step 2 — Assign verdict:
-    Any SLA breached    → FAIL
-    All SLAs met        → PASS
-    No SLAs configured  → use fallback rules in Step 3
-
-  Step 3 — No-SLA fallback classification:
-    CAPACITY-WALL   → FAIL (throughput ceiling with latency collapse)
-    ERROR-BOUND     → FAIL (active errors regardless of rate threshold)
-    LATENCY-BOUND   → FAIL if p99 > 5x avgResponseMs, else PASS
-    THROUGHPUT-BOUND → PASS
+  DETERMINE THE VERDICT using the identical logic defined in Executive
+  Summary Sentence 2 (Steps 1–4). That block is the single source of
+  truth — apply it here without re-deriving. The verdict here must match
+  the verdict stated in the Executive Summary exactly.
 
   OUTPUT FORMAT:
     If PASS with SLA:
-      One sentence per configured SLA — confirm the metric observed,
-      the threshold, and that it was met.
+      Read the "SLA Verdict" block in the input — it is the plain-text
+      block labelled "SLA Verdict (pre-computed — use these exact values
+      in the report)". It lists the worst transaction and exact values
+      for each SLA. Use those values verbatim — do not substitute global
+      averages (globalStats.errorRatePct, globalStats pNN, avgResponseMs).
+      One sentence per configured SLA:
+        Error Rate SLA: name the worst transaction and its exact error rate
+          from the SLA Verdict block, and confirm it is within the threshold.
+        RT SLA: name the worst transaction and its exact observed ms value
+          from the SLA Verdict block, and confirm it is within the threshold.
 
     If FAIL with SLA — error rate breach leads if both breach:
-      One sentence per breached SLA. Each sentence states: the metric
-      observed, the threshold, and the magnitude expressed as both the
-      raw overage (e.g. "+2.3%") and the percentage above threshold
-      (e.g. "230% of the configured limit").
+      For Error Rate SLA breach: use errorSlaSummary.verdict — write a
+      breach sentence ONLY IF errorSlaSummary.verdict is "BREACH". Use
+      errorSlaSummary.worstLabel, errorSlaSummary.worstErrorRatePct,
+      errorSlaSummary.thresholdPct, and errorSlaSummary.worstOveragePct
+      for exact values — do not compute them.
+      For RT SLA breach: use rtSlaSummary.verdict — write a breach sentence
+      ONLY IF rtSlaSummary.verdict is "BREACH". Use rtSlaSummary.worstLabel,
+      rtSlaSummary.worstObservedMs, rtSlaSummary.thresholdMs, and
+      rtSlaSummary.worstOverageMs for exact values — do not compute them.
+      One sentence per confirmed breach. Each sentence states: the
+      metric observed, the threshold, and the magnitude as both the raw
+      overage and the percentage above threshold.
+      Percentage above threshold for error rate = worstOveragePct ÷ thresholdPct × 100.
+      Percentage above threshold for RT = worstOverageMs ÷ thresholdMs × 100.
       Unbreached SLAs: confirm in a final sentence that they were met.
 
-    If no SLA configured:
-      One sentence: state PASS or FAIL, name the bottleneck
-      classification that determined it, and explicitly note that no
-      SLA threshold was configured — this verdict is based on
-      structural analysis only.
+    If no SLA configured and verdict is FAIL:
+      One sentence: state FAIL, name the bottleneck classification that
+      determined it, and explicitly note that no SLA threshold was
+      configured — this verdict is based on structural analysis only.
+
+    If no SLA configured and verdict is PASS with LATENCY-BOUND
+    classification (p99 ratio between 3x and 5x avgResponseMs):
+      Two sentences:
+        Sentence 1: State PASS and cite the exact p99 ratio
+          (e.g. "p99 is 3.8x avgResponseMs") — no FAIL gate was breached.
+        Sentence 2: State that the LATENCY-BOUND classification indicates
+          elevated latency variance and recommend monitoring under higher
+          load before the next release.
+
+    If no SLA configured and verdict is PASS with any other classification:
+      One sentence: state PASS, name the bottleneck classification, and
+      explicitly note that no SLA threshold was configured.
 
   Never write more than three sentences total.
   Never use words like "marginal", "borderline", "acceptable", or
