@@ -87,7 +87,9 @@ runtime overhead.
    [docs/ai-reporter.properties](docs/ai-reporter.properties).
    Set at least one provider's `api.key` to enable the AI report feature:
    ```properties
+   ai.reporter.mistral.api.key=          ← Recommended (free, high limits)
    ai.reporter.groq.api.key=
+   ai.reporter.cerebras.api.key=
    ai.reporter.openai.api.key=
    ai.reporter.claude.api.key=
    ```
@@ -265,8 +267,8 @@ Set live SLA thresholds in the **SLA Thresholds** panel. Breaching cells are hig
 Click **Generate AI Report** to analyse the loaded JTL data with any supported AI provider.
 A save dialog lets you choose where to save the self-contained HTML report.
 
-**Supported providers:** Groq (free, **Recommended**), Gemini (free), Mistral (free), DeepSeek (free),
-OpenAI (paid), Claude (paid), Ollama (local / free) — or any OpenAI-compatible endpoint.
+**Supported providers:** Mistral (free, **Recommended**), Groq (free), Gemini (free), DeepSeek (free),
+Cerebras (free), OpenAI (paid), Claude (paid), Ollama (local / free) — or any OpenAI-compatible endpoint.
 
 ### Report Contents
 
@@ -308,15 +310,35 @@ Copy [docs/ai-reporter.properties](docs/ai-reporter.properties) to `<JMETER_HOME
 and set at least one provider's `api.key`:
 
 ```properties
-ai.reporter.groq.api.key=gsk_your-key-here
-ai.reporter.openai.api.key=sk-your-key-here
+ai.reporter.mistral.api.key=your-key-here          ← Recommended (free, 500K TPM)
+ai.reporter.cerebras.api.key=csk-your-key-here     ← Free, 60K TPM
+ai.reporter.groq.api.key=gsk_your-key-here         ← Free, 12K TPM (may hit limits)
 ai.reporter.gemini.api.key=AIza-your-key-here
-ai.reporter.claude.api.key=sk-ant-your-key-here
-ai.reporter.mistral.api.key=your-key-here
 ai.reporter.deepseek.api.key=your-key-here
+ai.reporter.openai.api.key=sk-your-key-here
+ai.reporter.claude.api.key=sk-ant-your-key-here
 ```
 
 Select the provider from the dropdown next to the **Generate AI Report** button.
+
+### Provider Order and Tier Labels
+
+The dropdown order and free/paid labels are configurable in `ai-reporter.properties` — no
+rebuild required:
+
+```properties
+# Control the order providers appear in the dropdown (optional)
+# Providers not listed are appended alphabetically after those listed.
+ai.reporter.order=mistral,cerebras,gemini,groq,deepseek,openai,claude
+
+# Override the free/paid label for any provider (optional)
+# Built-in defaults are used when this property is absent.
+ai.reporter.mistral.tier=Free
+ai.reporter.cerebras.tier=Free
+ai.reporter.groq.tier=Free
+ai.reporter.openai.tier=Paid
+ai.reporter.claude.tier=Paid
+```
 
 ---
 
@@ -386,12 +408,12 @@ variables needed.
 
 **Windows:**
 ```cmd
-car-cli-report.bat -i results.jtl --provider groq --config ai-reporter.properties
+car-cli-report.bat -i results.jtl --provider mistral --config ai-reporter.properties
 ```
 
 **macOS / Linux:**
 ```bash
-./car-cli-report.sh -i results.jtl --provider groq --config ai-reporter.properties
+./car-cli-report.sh -i results.jtl --provider mistral --config ai-reporter.properties
 ```
 
 ### All Options
@@ -400,8 +422,9 @@ car-cli-report.bat -i results.jtl --provider groq --config ai-reporter.propertie
 Required:
   -i, --input FILE            JTL file path
   --provider STRING           provider name, case-insensitive
-                              (groq, openai, claude, gemini, mistral, deepseek,
-                               ollama, or any custom key in ai-reporter.properties)
+                              (mistral, groq, gemini, deepseek, cerebras,
+                               openai, claude, ollama, or any custom key
+                               in ai-reporter.properties)
   --config FILE               path to ai-reporter.properties
 
 Output:
@@ -431,23 +454,47 @@ Help:
 
 ### Exit Codes
 
-| Code | Meaning                                                               |
-|------|-----------------------------------------------------------------------|
-| `0`  | AI verdict **PASS** — pipeline continues                              |
-| `1`  | AI verdict **FAIL** — pipeline gate fails                             |
-| `2`  | AI verdict **UNDECISIVE** — pipeline continues                        |
-| `3`  | Invalid arguments                                                     |
-| `4`  | JTL parse error                                                       |
-| `5`  | AI provider error (key, ping, or API failure)                         |
-| `6`  | Report write error                                                    |
-| `7`  | Unexpected error — full stack trace printed to `stderr`               |
+| Code | Meaning                                          |
+|------|--------------------------------------------------|
+| `0`  | AI verdict **PASS** — pipeline continues         |
+| `1`  | AI verdict **FAIL** — pipeline gate fails        |
+| `2`  | AI verdict **UNDECISIVE** — pipeline continues   |
+| `3`  | Invalid arguments                                |
+| `4`  | JTL parse error                                  |
+| `5`  | AI provider error (key, ping, or API failure)    |
+| `6`  | Report write error                               |
+| `7`  | Unexpected error — full stack trace printed to stderr |
+
+### Notes
+
+**Progress output goes to stderr.** All `[CLI]` progress messages (parsing, pinging, calling AI,
+etc.) are written to `stderr` so that `stdout` stays clean for scripting. Capture stdout only to
+get the report path and verdict:
+
+```bash
+OUTPUT=$(./car-cli-report.sh -i results.jtl --provider mistral --config ai-reporter.properties 2>/dev/null)
+REPORT_PATH=$(echo "$OUTPUT" | head -1)
+VERDICT=$(echo "$OUTPUT" | tail -1)
+```
+
+**`--regex` requires `--search`.** Passing `--regex` without `--search` is a validation error
+(exit code `3`). Always pair the two flags:
+
+```bash
+--search "Login|Checkout" --regex
+```
+
+**SLA thresholds influence AI analysis.** The `--error-sla` and `--rt-sla` values are passed
+directly into the AI analysis prompt. The AI evaluates whether those thresholds were met or
+breached and factors them into its PASS/FAIL verdict. If no SLA args are provided, the AI
+performs a best-effort analysis without a configured threshold reference.
 
 ### Example — CI/CD Pipeline
 
 ```bash
 ./car-cli-report.sh \
   -i results.jtl -o report.html \
-  --provider openai --config /etc/jmeter/ai-reporter.properties \
+  --provider mistral --config /etc/jmeter/ai-reporter.properties \
   --start-offset 10 --end-offset 300 --percentile 95 \
   --scenario-name "Nightly Load Test" --virtual-users 200 \
   --error-sla 5 --rt-sla 2000 --rt-metric percentile
@@ -541,8 +588,22 @@ key on your provider's dashboard and update the properties file. The plugin re-r
 on every **Generate AI Report** click — no restart needed.
 
 **Rate limit exceeded — "HTTP 429" error.**
-The provider's free tier limit has been reached. Wait a moment and try again, or switch to a
-different provider in the dropdown. Groq's free tier resets every minute; Gemini's resets daily.
+The provider's free tier request limit has been reached. Wait a moment and try again, or switch
+to a different provider in the dropdown.
+
+**"HTTP 413" error — request too large (Groq free tier).**
+Groq's free `on_demand` tier has a hard cap of 12,000 tokens per minute. The plugin's system
+prompt combined with your JTL data exceeds this limit. Switch to Mistral (500,000 TPM free) or
+upgrade to the Groq Developer plan. No code changes are needed — just update the provider in
+the dropdown or `--provider` flag.
+
+**"HTTP 400 — context_length_exceeded" error (Cerebras).**
+The total request size exceeds the selected model's context window. Switch to a model with a
+larger context window — `qwen-3-235b-a22b-instruct-2507` (131K context) works reliably. Update
+in `ai-reporter.properties`:
+```properties
+ai.reporter.cerebras.model=qwen-3-235b-a22b-instruct-2507
+```
 
 **Ollama: "Could not connect" error.**
 Ollama is not running. Start it with `ollama serve` (or it starts automatically on most

@@ -195,7 +195,7 @@ final class CliReportPipeline {
         String slaErrorPct = args.hasErrorSla()
                 ? args.errorSla() + "%" : "Not configured";
         String slaRtMs = args.hasRtSla()
-                ? args.rtSla() + "ms" : "Not configured";
+                ? args.rtSla() + " ms" : "Not configured";
         String slaRtMetric = "percentile".equals(args.rtMetric())
                 ? "P" + args.percentile() + " (ms)" : "Avg (ms)";
 
@@ -217,7 +217,8 @@ final class CliReportPipeline {
 
         return new PromptBuilder(systemPrompt)
                 .build(result.results, args.percentile(), request,
-                        result.errorTypeSummary, latency);
+                        result.errorTypeSummary, latency,
+                        result.timeBuckets);
     }
 
     // ─────────────────────────────────────────────────────────────
@@ -227,6 +228,9 @@ final class CliReportPipeline {
     private HtmlReportRenderer.RenderConfig buildRenderConfig(JTLParser.ParseResult result,
                                                               TimeContext timeCtx,
                                                               AiProviderConfig provider) {
+        double errorSla = args.hasErrorSla() ? (double) args.errorSla() : -1.0;
+        long   rtSla    = args.hasRtSla()    ? (long)   args.rtSla()    : -1L;
+        String rtMetric = "percentile".equals(args.rtMetric()) ? "pnn" : "avg";
         return new HtmlReportRenderer.RenderConfig(
                 timeCtx.users(),
                 args.scenarioName(),
@@ -236,7 +240,8 @@ final class CliReportPipeline {
                 timeCtx.endTime(),
                 timeCtx.duration(),
                 args.percentile(),
-                provider.displayName);
+                provider.displayName,
+                errorSla, rtSla, rtMetric);
     }
 
     // ─────────────────────────────────────────────────────────────

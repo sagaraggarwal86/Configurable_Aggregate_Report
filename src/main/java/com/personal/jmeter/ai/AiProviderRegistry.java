@@ -52,7 +52,7 @@ public final class AiProviderRegistry {
 
     // ── Global defaults ────────────────────────────────────────────────────
     private static final int    DEFAULT_TIMEOUT   = 60;
-    private static final int    DEFAULT_MAX_TOKENS = 4096;
+    private static final int    DEFAULT_MAX_TOKENS = 8192;
     private static final double DEFAULT_TEMPERATURE = 0.3;
 
     // ── Known-provider metadata ────────────────────────────────────────────
@@ -61,42 +61,46 @@ public final class AiProviderRegistry {
      * Groq is always first when configured.
      */
     static final List<String> KNOWN_PROVIDERS = List.of(
-            "groq", "gemini", "mistral", "deepseek", "openai", "claude"
+            "groq", "gemini", "mistral", "deepseek", "cerebras", "openai", "claude"
     );
 
     private static final Map<String, String> KNOWN_LABELS = Map.of(
-            "groq",     "Groq (Free)",
-            "gemini",   "Gemini (Free)",
-            "mistral",  "Mistral (Free)",
-            "deepseek", "DeepSeek (Free)",
-            "openai",   "OpenAI (Paid)",
-            "claude",   "Claude (Paid)"
+            "groq",      "Groq (Free)",
+            "gemini",    "Gemini (Free)",
+            "mistral",   "Mistral (Free)",
+            "deepseek",  "DeepSeek (Free)",
+            "cerebras",  "Cerebras (Free)",
+            "openai",    "OpenAI (Paid)",
+            "claude",    "Claude (Paid)"
     );
 
     private static final Map<String, String> KNOWN_DEFAULT_MODELS = Map.of(
-            "groq",     "llama-3.3-70b-versatile",
-            "gemini",   "gemini-1.5-pro",
-            "mistral",  "mistral-large-latest",
-            "deepseek", "deepseek-chat",
-            "openai",   "gpt-4o",
-            "claude",   "claude-sonnet-4-6"
+            "groq",      "llama-3.3-70b-versatile",
+            "gemini",    "gemini-1.5-pro",
+            "mistral",   "mistral-large-latest",
+            "deepseek",  "deepseek-chat",
+            "cerebras",  "qwen-3-235b-a22b-instruct-2507",
+            "openai",    "gpt-4o",
+            "claude",    "claude-sonnet-4-6"
     );
 
     private static final Map<String, String> KNOWN_BASE_URLS = Map.of(
-            "groq",     "https://api.groq.com/openai/v1",
-            "gemini",   "https://generativelanguage.googleapis.com/v1beta/openai",
-            "mistral",  "https://api.mistral.ai/v1",
-            "deepseek", "https://api.deepseek.com/v1",
-            "openai",   "https://api.openai.com/v1",
-            "claude",   "https://api.anthropic.com/v1"
+            "groq",      "https://api.groq.com/openai/v1",
+            "gemini",    "https://generativelanguage.googleapis.com/v1beta/openai",
+            "mistral",   "https://api.mistral.ai/v1",
+            "deepseek",  "https://api.deepseek.com/v1",
+            "cerebras",  "https://api.cerebras.ai/v1",
+            "openai",    "https://api.openai.com/v1",
+            "claude",    "https://api.anthropic.com/v1"
     );
 
     // ── Known API key format prefixes (for structural validation) ──────────
     private static final Map<String, String> KNOWN_KEY_PREFIXES = Map.of(
-            "groq",   "gsk_",
-            "openai", "sk-",
-            "claude", "sk-ant-",
-            "gemini", "AIza"
+            "groq",      "gsk_",
+            "openai",    "sk-",
+            "claude",    "sk-ant-",
+            "gemini",    "AIza",
+            "cerebras",  "csk-"
     );
 
     // ── Ping cache: "providerKey:apiKey" → true (only successful pings are cached).
@@ -246,13 +250,16 @@ public final class AiProviderRegistry {
             }
         }
 
-        // Order: known providers first (in canonical order), then unknowns alphabetically
+        // Order: ai.reporter.order (user-defined) → KNOWN_PROVIDERS (built-in) → unknowns alphabetically
+        // ai.reporter.order takes precedence when present; missing/blank falls back to KNOWN_PROVIDERS.
+        List<String> canonical = resolveOrder(props);
         List<String> ordered = new ArrayList<>();
-        for (String known : KNOWN_PROVIDERS) {
-            if (allConfigured.contains(known)) ordered.add(known);
+        for (String key : canonical) {
+            if (allConfigured.contains(key)) ordered.add(key);
         }
+        // Append any configured providers not covered by the canonical order, alphabetically
         allConfigured.stream()
-                .filter(k -> !KNOWN_PROVIDERS.contains(k))
+                .filter(k -> !canonical.contains(k))
                 .sorted()
                 .forEach(ordered::add);
 
@@ -263,6 +270,38 @@ public final class AiProviderRegistry {
         }
         log.debug("buildProviderList: {} configured provider(s): {}", result.size(), ordered);
         return result;
+    }
+
+    /**
+     * Resolves the canonical provider order.
+     *
+     * <p>Resolution order:</p>
+     * <ol>
+     *   <li>{@code ai.reporter.order} in the properties file — user-defined, comma-separated
+     *       list of provider keys (e.g. {@code cerebras,mistral,groq}).</li>
+     *   <li>{@link #KNOWN_PROVIDERS} — built-in fallback when the property is absent or blank.</li>
+     * </ol>
+     *
+     * @param props loaded properties
+     * @return ordered list of provider keys to use as the canonical ordering
+     */
+    private static List<String> resolveOrder(Properties props) {
+        String orderProp = props.getProperty(PREFIX + "order", "").trim();
+        if (!orderProp.isBlank()) {
+            List<String> userOrder = new ArrayList<>();
+            for (String part : orderProp.split(",")) {
+                String key = part.trim().toLowerCase();
+                if (!key.isEmpty() && !userOrder.contains(key)) {
+                    userOrder.add(key);
+                }
+            }
+            if (!userOrder.isEmpty()) {
+                log.debug("resolveOrder: using ai.reporter.order: {}", userOrder);
+                return userOrder;
+            }
+        }
+        log.debug("resolveOrder: ai.reporter.order absent — using built-in KNOWN_PROVIDERS order.");
+        return KNOWN_PROVIDERS;
     }
 
     /**
@@ -282,8 +321,7 @@ public final class AiProviderRegistry {
             return null;
         }
 
-        String label = KNOWN_LABELS.getOrDefault(key,
-                Character.toUpperCase(key.charAt(0)) + key.substring(1));
+        String label = resolveLabel(key, props);
 
         try {
             return new AiProviderConfig(key, label, apiKey, model, baseUrl, timeout, maxTok, temp);
@@ -291,6 +329,32 @@ public final class AiProviderRegistry {
             log.warn("buildConfig: provider '{}' skipped — {}.", key, e.getMessage());
             return null;
         }
+    }
+
+    /**
+     * Resolves the display label for a provider.
+     *
+     * <p>Resolution order:</p>
+     * <ol>
+     *   <li>{@code ai.reporter.<key>.tier} in the properties file — appended as
+     *       {@code "Key (tier)"} (e.g. {@code "Cerebras (Free)"}).</li>
+     *   <li>{@link #KNOWN_LABELS} — built-in label for known providers.</li>
+     *   <li>Capitalised key with no suffix — fallback for unknown providers
+     *       with no tier property.</li>
+     * </ol>
+     *
+     * @param key   provider key (e.g. {@code "cerebras"})
+     * @param props loaded properties
+     * @return display label for the provider
+     */
+    private static String resolveLabel(String key, Properties props) {
+        String tier = resolve(props, key, "tier", "").trim();
+        if (!tier.isBlank()) {
+            String base = Character.toUpperCase(key.charAt(0)) + key.substring(1);
+            return base + " (" + tier + ")";
+        }
+        return KNOWN_LABELS.getOrDefault(key,
+                Character.toUpperCase(key.charAt(0)) + key.substring(1));
     }
 
     private static String resolve(Properties props, String providerKey,

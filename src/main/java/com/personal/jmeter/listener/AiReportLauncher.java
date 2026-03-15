@@ -229,7 +229,7 @@ final class AiReportLauncher {
         final String slaErrorPct = sla.isErrorPctEnabled()
                 ? sla.errorPctThreshold + "%" : "Not configured";
         final String slaRtMs = sla.isRtEnabled()
-                ? sla.rtThresholdMs + "ms" : "Not configured";
+                ? sla.rtThresholdMs + " ms" : "Not configured";
         final String slaRtMetric = sla.rtMetric == com.personal.jmeter.listener.SlaConfig.RtMetric.AVG
                 ? "Avg (ms)" : "P" + percentile + " (ms)";
 
@@ -245,17 +245,26 @@ final class AiReportLauncher {
 
         return new PromptBuilder(systemPrompt).build(
                 dataProvider.getCachedResults(), percentile, request,
-                dataProvider.getErrorTypeSummary(), latency);
+                dataProvider.getErrorTypeSummary(), latency,
+                dataProvider.getCachedBuckets());
     }
 
     private AiReportCoordinator.ReportContext buildReportContext(AiProviderConfig providerConfig) {
         final ScenarioMetadata metadata   = dataProvider.getMetadata();
         final int              percentile = dataProvider.getPercentile();
+        final com.personal.jmeter.listener.SlaConfig sla = dataProvider.getSlaConfig();
+
+        double errorSla = sla.isErrorPctEnabled() ? sla.errorPctThreshold : -1.0;
+        long   rtSla    = sla.isRtEnabled()        ? sla.rtThresholdMs    : -1L;
+        String rtMetric = sla.rtMetric == com.personal.jmeter.listener.SlaConfig.RtMetric.AVG
+                ? "avg" : "pnn";
+
         final HtmlReportRenderer.RenderConfig config = new HtmlReportRenderer.RenderConfig(
                 metadata.users, metadata.scenarioName, metadata.scenarioDesc,
                 metadata.threadGroupName,
                 dataProvider.getStartTime(), dataProvider.getEndTime(),
-                dataProvider.getDuration(), percentile, providerConfig.displayName);
+                dataProvider.getDuration(), percentile, providerConfig.displayName,
+                errorSla, rtSla, rtMetric);
 
         return new AiReportCoordinator.ReportContext(
                 dataProvider.getVisibleTableRows(),
